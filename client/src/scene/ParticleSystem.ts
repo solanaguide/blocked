@@ -58,9 +58,12 @@ export class ParticleSystem {
   private createMaterial() {
     // Use MeshBasicMaterial for pure colors without lighting interference
     this.material = new THREE.MeshBasicMaterial({
+      color: 0xffffff,    // White base - vertex colors will multiply with this
       vertexColors: true, // Per-instance colors
       toneMapped: false,  // Prevent color washing
     }) as any; // Cast to MeshStandardMaterial type for compatibility
+
+    console.log('🎨 Material created:', this.material.type, 'vertexColors:', (this.material as any).vertexColors, 'color:', (this.material as any).color.getHexString());
   }
 
   private createInstancedMeshes() {
@@ -197,25 +200,43 @@ export class ParticleSystem {
   }
 
   private calculateColor(trade: TradeMessage): number {
+    let color: number;
+
     switch (this.focusMode) {
       case 'program':
-        return this.programColors.get(trade.p) || 0xffffff;
+        color = this.programColors.get(trade.p) || 0xffffff;
+        if (Math.random() < 0.01) {
+          console.log(`🎨 PROGRAM mode: ${trade.p} → 0x${color.toString(16)}`);
+        }
+        return color;
 
       case 'token':
-        return this.tokenColors.get(trade.ta) || this.hashColor(trade.ta);
+        color = this.tokenColors.get(trade.ta) || this.hashColor(trade.ta);
+        if (Math.random() < 0.01) {
+          console.log(`🎨 TOKEN mode: ${trade.ta} → 0x${color.toString(16)}`);
+        }
+        return color;
 
       case 'volume':
         // Heat map: blue -> cyan -> purple -> pink -> red
         // Adjusted thresholds for better distribution
-        if (trade.vu < 10) return 0x00ffff;       // Cyan (micro trades)
-        if (trade.vu < 50) return 0x0099ff;       // Blue
-        if (trade.vu < 200) return 0x8b5cf6;      // Purple
-        if (trade.vu < 1000) return 0xff1493;     // Deep Pink
-        if (trade.vu < 5000) return 0xff006e;     // Hot Pink
-        return 0xff3333;                           // Red (whales)
+        if (trade.vu < 10) color = 0x00ffff;       // Cyan (micro trades)
+        else if (trade.vu < 50) color = 0x0099ff;  // Blue
+        else if (trade.vu < 200) color = 0x8b5cf6; // Purple
+        else if (trade.vu < 1000) color = 0xff1493; // Deep Pink
+        else if (trade.vu < 5000) color = 0xff006e; // Hot Pink
+        else color = 0xff3333;                      // Red (whales)
+
+        if (Math.random() < 0.01) {
+          console.log(`🎨 VOLUME mode: $${trade.vu.toFixed(2)} → 0x${color.toString(16)}`);
+        }
+        return color;
 
       case 'free':
       default:
+        if (Math.random() < 0.01) {
+          console.log(`🎨 FREE mode: white (0xffffff)`);
+        }
         return 0xffffff;
     }
   }
@@ -339,6 +360,11 @@ export class ParticleSystem {
 
       // Set color - pure vibrant colors (no multiplier needed with MeshBasicMaterial)
       particle.mesh.setColorAt(particle.instanceId, particle.color);
+
+      // Debug: log color setting occasionally
+      if (Math.random() < 0.001) {
+        console.log(`🎨 Setting color on instance ${particle.instanceId}:`, particle.color.getHexString(), 'focus:', this.focusMode);
+      }
     }
 
     // Update all meshes
