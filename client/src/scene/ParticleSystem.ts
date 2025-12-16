@@ -100,10 +100,10 @@ export class ParticleSystem {
   }
 
   addTrade(trade: TradeMessage, slot: number) {
-    // Calculate spawn position (random point on cylinder perimeter)
+    // Calculate spawn position - TIGHT ring around block at center
     const angle = Math.random() * Math.PI * 2;
-    const radius = 40 + Math.random() * 10;
-    const height = (Math.random() - 0.5) * 20;
+    const radius = 12 + Math.random() * 3; // Much closer: 12-15 units from center
+    const height = (Math.random() - 0.5) * 15; // Tighter vertical spread
 
     const position = new THREE.Vector3(
       Math.cos(angle) * radius,
@@ -177,9 +177,9 @@ export class ParticleSystem {
   }
 
   private calculateSpeed(volumeUsd: number): number {
-    // Particles fly toward stationary block at center
+    // Particles fly toward stationary block at center - MUCH FASTER
     // Speed proportional to volume - bigger trades move faster
-    return 1.5 + Math.log10(Math.max(1, volumeUsd)) * 0.15;
+    return 15.0 + Math.log10(Math.max(1, volumeUsd)) * 1.5; // 10x faster
   }
 
   private calculateSize(volumeUsd: number): number {
