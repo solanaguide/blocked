@@ -74,10 +74,25 @@ export class ParticleSystem {
         this.maxInstances
       );
       mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+
+      // CRITICAL: Initialize instance colors buffer
+      // Without this, setColorAt() calls are ignored!
+      const colors = new Float32Array(this.maxInstances * 3);
+      // Initialize all to white
+      for (let i = 0; i < this.maxInstances; i++) {
+        colors[i * 3] = 1.0;     // R
+        colors[i * 3 + 1] = 1.0; // G
+        colors[i * 3 + 2] = 1.0; // B
+      }
+      mesh.instanceColor = new THREE.InstancedBufferAttribute(colors, 3);
+      mesh.instanceColor.setUsage(THREE.DynamicDrawUsage);
+
       mesh.count = 0; // Start with no instances
       this.scene.add(mesh);
       this.instancedMeshes.set(shape, mesh);
       this.instanceCounts.set(shape, 0);
+
+      console.log(`🎨 Created ${shape} mesh with instanceColor buffer:`, mesh.instanceColor !== null);
     }
   }
 
