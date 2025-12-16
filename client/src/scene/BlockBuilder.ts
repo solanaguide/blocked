@@ -142,7 +142,7 @@ export class BlockBuilder {
     // Block is at center (0, 0, 0), so distance check is simple
     const blockPos = formingBlock.mesh.position;
     const distance = particlePosition.distanceTo(blockPos);
-    const lockRadius = formingBlock.gridSize * 0.6; // Particles must get close to lock
+    const lockRadius = formingBlock.gridSize * 0.8; // Larger radius for container filling
 
     if (distance > lockRadius) {
       return { locked: false };

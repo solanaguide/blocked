@@ -100,21 +100,30 @@ export class ParticleSystem {
   }
 
   addTrade(trade: TradeMessage, slot: number) {
-    // Calculate spawn position - TIGHT ring around block at center
-    const angle = Math.random() * Math.PI * 2;
-    const radius = 12 + Math.random() * 3; // Much closer: 12-15 units from center
-    const height = (Math.random() - 0.5) * 15; // Tighter vertical spread
+    // CONTAINER APPROACH: Spawn particles ABOVE block, they "rain down" and settle inside
+    // Block is at (0, 0, 0) with size ~25 units
+    // Spawn in a cone/funnel above it
+
+    const blockSize = 25; // Approximate block size
+    const spawnHeight = 20 + Math.random() * 10; // 20-30 units above center
+
+    // Random position within block's X/Z footprint (so they fall INTO the block)
+    const spreadX = (Math.random() - 0.5) * blockSize * 0.8;
+    const spreadZ = (Math.random() - 0.5) * blockSize * 0.8;
 
     const position = new THREE.Vector3(
-      Math.cos(angle) * radius,
-      height,
-      Math.sin(angle) * radius
+      spreadX,
+      spawnHeight,
+      spreadZ
     );
 
-    // Calculate velocity towards center
-    const direction = new THREE.Vector3(0, 0, 0).sub(position).normalize();
+    // Velocity: primarily downward (gravity-like), slight inward drift
     const speed = this.calculateSpeed(trade.vu);
-    const velocity = direction.multiplyScalar(speed);
+    const velocity = new THREE.Vector3(
+      -spreadX * 0.05, // Slight drift toward center X
+      -speed,          // Downward (rain down)
+      -spreadZ * 0.05  // Slight drift toward center Z
+    );
 
     // Calculate size
     const size = this.calculateSize(trade.vu);
@@ -177,9 +186,9 @@ export class ParticleSystem {
   }
 
   private calculateSpeed(volumeUsd: number): number {
-    // Particles fly toward stationary block at center - MUCH FASTER
-    // Speed proportional to volume - bigger trades move faster
-    return 15.0 + Math.log10(Math.max(1, volumeUsd)) * 1.5; // 10x faster
+    // CONTAINER APPROACH: Fall speed (downward velocity)
+    // Bigger trades fall faster (like heavier objects)
+    return 2.0 + Math.log10(Math.max(1, volumeUsd)) * 0.3;
   }
 
   private calculateSize(volumeUsd: number): number {
@@ -260,23 +269,26 @@ export class ParticleSystem {
             }
           }
         } else {
-          // Normal behavior: fly toward center and try to lock to forming block
-          const center = new THREE.Vector3(0, 0, 0);
-          const directionToCenter = center.sub(particle.position).normalize();
-          const speed = this.calculateSpeed(particle.trade.vu);
-          particle.velocity.copy(directionToCenter.multiplyScalar(speed));
+          // CONTAINER APPROACH: Particles rain down, maintaining their downward velocity
+          // They DON'T recalculate toward center - they fall straight down
 
-          // Update position - move toward center
+          // Update position - particles fall with their initial velocity
           particle.position.add(
-            particle.velocity.clone().multiplyScalar(deltaTime * 0.1)
+            particle.velocity.clone().multiplyScalar(deltaTime * 0.05) // Slower fall for visibility
           );
 
-          // Try to lock into forming block if close enough AND slots match
-          const lockResult = blockBuilder.lockParticle(particle.id, particle.slot, particle.position);
-          if (lockResult.locked && lockResult.gridPosition) {
-            particle.locked = true;
-            particle.lockedPosition.copy(lockResult.gridPosition);
-            particle.velocity.set(0, 0, 0);
+          // Try to lock when particle enters block volume (distance from center)
+          const distanceFromCenter = particle.position.length();
+          const blockRadius = 12; // Half of block size
+
+          if (distanceFromCenter < blockRadius || particle.position.y < 2) {
+            // Particle has entered block volume or reached the floor - try to lock
+            const lockResult = blockBuilder.lockParticle(particle.id, particle.slot, particle.position);
+            if (lockResult.locked && lockResult.gridPosition) {
+              particle.locked = true;
+              particle.lockedPosition.copy(lockResult.gridPosition);
+              particle.velocity.set(0, 0, 0);
+            }
           }
         }
       } else {
