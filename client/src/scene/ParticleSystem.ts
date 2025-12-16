@@ -287,6 +287,12 @@ export class ParticleSystem {
                              Math.abs(particle.position.z) < blockHalfSize;
           const hasFallenInside = particle.position.y < 0; // Below center plane, in bottom half
 
+          // Stop particles from falling through the bottom
+          if (particle.position.y < -blockHalfSize) {
+            particle.position.y = -blockHalfSize;
+            particle.velocity.y = 0; // Stop falling
+          }
+
           if (isInsideXZ && hasFallenInside) {
             // Particle is inside container and has settled to bottom - lock it
             const lockResult = blockBuilder.lockParticle(particle.id, particle.slot, particle.position);
