@@ -277,12 +277,18 @@ export class ParticleSystem {
             particle.velocity.clone().multiplyScalar(deltaTime * 0.05) // Slower fall for visibility
           );
 
-          // Try to lock when particle enters block volume (distance from center)
-          const distanceFromCenter = particle.position.length();
-          const blockRadius = 12; // Half of block size
+          // CONTAINER LOGIC: Only lock when particle has fallen INTO the block
+          // Block is at (0,0,0) with size 25, so y ranges from -12.5 to +12.5
+          // We want particles to fall BELOW the top and settle on the BOTTOM
+          // Lock when: particle is INSIDE the block's X/Z footprint AND has fallen to bottom half
 
-          if (distanceFromCenter < blockRadius || particle.position.y < 2) {
-            // Particle has entered block volume or reached the floor - try to lock
+          const blockHalfSize = 12.5;
+          const isInsideXZ = Math.abs(particle.position.x) < blockHalfSize &&
+                             Math.abs(particle.position.z) < blockHalfSize;
+          const hasFallenInside = particle.position.y < 0; // Below center plane, in bottom half
+
+          if (isInsideXZ && hasFallenInside) {
+            // Particle is inside container and has settled to bottom - lock it
             const lockResult = blockBuilder.lockParticle(particle.id, particle.slot, particle.position);
             if (lockResult.locked && lockResult.gridPosition) {
               particle.locked = true;

@@ -68,7 +68,16 @@ export class Scene {
   private animate() {
     requestAnimationFrame(this.animate.bind(this));
 
-    const deltaTime = this.clock.getDelta() * 1000; // Convert to ms
+    let deltaTime = this.clock.getDelta() * 1000; // Convert to ms
+
+    // CAP deltaTime to prevent huge jumps when tab becomes active after being inactive
+    // (requestAnimationFrame pauses when tab inactive, but WebSocket keeps receiving)
+    const MAX_DELTA = 100; // Cap at 100ms (~10fps minimum)
+    if (deltaTime > MAX_DELTA) {
+      console.log(`⚠️ Large deltaTime spike: ${deltaTime.toFixed(0)}ms, capping to ${MAX_DELTA}ms`);
+      deltaTime = MAX_DELTA;
+    }
+
     const time = this.clock.getElapsedTime() * 1000;
 
     // Update subsystems
@@ -96,13 +105,26 @@ export class Scene {
   }
 
   addTrade(trade: TradeMessage) {
-    // Check for slot change FIRST, before spawning particle
-    if (trade.s !== this.currentSlot && this.currentSlot !== 0) {
+    // FIRST TRADE EVER: Create initial block before anything else
+    if (this.currentSlot === 0) {
+      console.log(`🎬 First trade! Creating initial block for slot ${trade.s}`);
+      const blockData: BlockData = {
+        slot: trade.s,
+        trades: 0,
+        volume: 0,
+        timestamp: Date.now(),
+        particles: [],
+      };
+      this.blockBuilder.startBlock(blockData);
+      this.currentSlot = trade.s;
+    }
+    // Check for slot change, before spawning particle
+    else if (trade.s !== this.currentSlot) {
       // New slot detected! Complete old block and start new one
       console.log(`🔄 Slot change detected: ${this.currentSlot} → ${trade.s}`);
       this.onBlockComplete(this.currentSlot, trade.s);
+      this.currentSlot = trade.s;
     }
-    this.currentSlot = trade.s;
 
     // ALWAYS spawn particle for every trade - no skipping!
     this.particleSystem.addTrade(trade, trade.s);
