@@ -59,8 +59,9 @@ export class ParticleSystem {
     this.material = new THREE.MeshStandardMaterial({
       metalness: 0.8,
       roughness: 0.2,
-      emissive: 0xffffff,
-      emissiveIntensity: 0.5,
+      emissive: 0x000000, // No base emissive - use per-instance colors
+      emissiveIntensity: 0.3,
+      vertexColors: true, // CRITICAL: Enable per-instance colors
     });
   }
 
@@ -101,11 +102,11 @@ export class ParticleSystem {
 
   addTrade(trade: TradeMessage, slot: number) {
     // CONTAINER APPROACH: Spawn particles ABOVE block, they "rain down" and settle inside
-    // Block is at (0, 0, 0) with size ~25 units
+    // Block is at (0, 0, 0) with size 30 units (fixed size)
     // Spawn in a cone/funnel above it
 
-    const blockSize = 25; // Approximate block size
-    const spawnHeight = 20 + Math.random() * 10; // 20-30 units above center
+    const blockSize = 30; // Block size (must match BlockBuilder)
+    const spawnHeight = 25 + Math.random() * 10; // 25-35 units above center
 
     // Random position within block's X/Z footprint (so they fall INTO the block)
     const spreadX = (Math.random() - 0.5) * blockSize * 0.8;
@@ -142,7 +143,7 @@ export class ParticleSystem {
     particle.rotation.set(0, 0, 0);
     particle.rotationSpeed.set(0, 0, 0);
     particle.lifetime = 0;
-    particle.maxLifetime = 10000; // 10 seconds - plenty of time
+    particle.maxLifetime = 500; // 500ms - orphan cleanup
     particle.trade = trade;
     particle.locked = false;
     particle.lockedPosition.set(0, 0, 0);
@@ -192,9 +193,9 @@ export class ParticleSystem {
   }
 
   private calculateSize(volumeUsd: number): number {
-    // ALWAYS proportional to trade volume
-    const baseSize = 0.3 + Math.log10(Math.max(1, volumeUsd)) * 0.5;
-    return Math.min(baseSize * this.sizeMultiplier, 8); // Cap at 8 units
+    // ALWAYS proportional to trade volume - LARGER for visibility
+    const baseSize = 0.8 + Math.log10(Math.max(1, volumeUsd)) * 0.8;
+    return Math.min(baseSize * this.sizeMultiplier, 12); // Cap at 12 units
   }
 
   private calculateColor(trade: TradeMessage): number {
@@ -239,14 +240,16 @@ export class ParticleSystem {
     const color = new THREE.Color();
 
     for (const particle of this.particles.values()) {
-      // Update lifetime
-      particle.lifetime += deltaTime;
+      // Update lifetime (only for unlocked particles - locked ones are safe)
+      if (!particle.locked) {
+        particle.lifetime += deltaTime;
 
-      // Safety: Only remove if lifetime exceeded (should never happen - cleanup by slot is primary)
-      if (particle.lifetime > particle.maxLifetime) {
-        if (Math.random() < 0.01) console.log(`♻️ Removing old particle from slot ${particle.slot}`);
-        this.particles.delete(particle.id);
-        continue;
+        // Orphan cleanup: Remove unlocked particles after 500ms
+        if (particle.lifetime > particle.maxLifetime) {
+          if (Math.random() < 0.05) console.log(`♻️ Removing orphan particle ${particle.id.slice(0,6)} from slot ${particle.slot} (500ms timeout)`);
+          this.particles.delete(particle.id);
+          continue;
+        }
       }
 
       // Safety: Remove particles that fell way below the floor
@@ -278,11 +281,11 @@ export class ParticleSystem {
           );
 
           // CONTAINER LOGIC: Only lock when particle has fallen INTO the block
-          // Block is at (0,0,0) with size 25, so y ranges from -12.5 to +12.5
+          // Block is at (0,0,0) with size 30, so y ranges from -15 to +15
           // We want particles to fall BELOW the top and settle on the BOTTOM
           // Lock when: particle is INSIDE the block's X/Z footprint AND has fallen to bottom half
 
-          const blockHalfSize = 12.5;
+          const blockHalfSize = 15;
           const isInsideXZ = Math.abs(particle.position.x) < blockHalfSize &&
                              Math.abs(particle.position.z) < blockHalfSize;
           const hasFallenInside = particle.position.y < 0; // Below center plane, in bottom half
@@ -327,7 +330,10 @@ export class ParticleSystem {
       matrix.setPosition(particle.position);
 
       particle.mesh.setMatrixAt(particle.instanceId, matrix);
-      particle.mesh.setColorAt(particle.instanceId, particle.color);
+
+      // Set color with brightness boost for visibility
+      const brightColor = particle.color.clone().multiplyScalar(1.5);
+      particle.mesh.setColorAt(particle.instanceId, brightColor);
     }
 
     // Update all meshes

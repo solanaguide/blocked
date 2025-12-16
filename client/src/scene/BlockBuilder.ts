@@ -22,8 +22,9 @@ export class BlockBuilder {
       }
     }
 
-    // Create block mesh - much larger and more prominent
-    const blockSize = Math.min(25, 10 + Math.log10(Math.max(1, blockData.volume)) * 2);
+    // Create block mesh - FIXED SIZE since we don't know volume yet (container approach)
+    // Larger size for better visibility
+    const blockSize = 30; // Fixed size container
     const geometry = new THREE.BoxGeometry(blockSize, blockSize, blockSize);
 
     // Transparent material so you can see trades inside
