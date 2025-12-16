@@ -14,7 +14,7 @@ export class ParticleSystem {
 
   // Instance tracking
   private instanceCounts: Map<ParticleShape, number> = new Map();
-  private maxInstances = 3000;
+  private maxInstances = 10000; // Increased for high-throughput scenarios
 
   private currentShape: ParticleShape = 'cube';
   private focusMode: FocusMode = 'volume';
@@ -99,7 +99,7 @@ export class ParticleSystem {
     this.updateAllParticles();
   }
 
-  addTrade(trade: TradeMessage) {
+  addTrade(trade: TradeMessage, slot: number) {
     // Calculate spawn position (random point on cylinder perimeter)
     const angle = Math.random() * Math.PI * 2;
     const radius = 40 + Math.random() * 10;
@@ -122,44 +122,39 @@ export class ParticleSystem {
     // Calculate color
     const color = this.calculateColor(trade);
 
-    // Create or reuse particle
-    const particle: Particle = this.getParticle();
+    // Create NEW particle (no recycling!)
+    const particle: Particle = this.createNewParticle(slot);
     particle.id = trade.sig;
+    particle.slot = slot;
     particle.position.copy(position);
     particle.velocity.copy(velocity);
     particle.size = size;
     particle.color.set(color);
-    particle.rotation.set(
-      Math.random() * Math.PI * 2,
-      Math.random() * Math.PI * 2,
-      Math.random() * Math.PI * 2
-    );
-    particle.rotationSpeed.set(
-      (Math.random() - 0.5) * 0.05,
-      (Math.random() - 0.5) * 0.05,
-      (Math.random() - 0.5) * 0.05
-    );
+    particle.rotation.set(0, 0, 0);
+    particle.rotationSpeed.set(0, 0, 0);
     particle.lifetime = 0;
-    particle.maxLifetime = 3000; // 3 seconds - faster turnover
+    particle.maxLifetime = 10000; // 10 seconds - plenty of time
     particle.trade = trade;
+    particle.locked = false;
+    particle.lockedPosition.set(0, 0, 0);
 
     this.particles.set(particle.id, particle);
   }
 
-  private getParticle(): Particle {
+  private createNewParticle(slot: number): Particle {
     const mesh = this.instancedMeshes.get(this.currentShape)!;
     let instanceId = this.instanceCounts.get(this.currentShape)!;
 
     if (instanceId >= this.maxInstances) {
-      // Reuse oldest particle
-      const oldest = Array.from(this.particles.values())[0];
-      this.particles.delete(oldest.id);
-      return oldest;
+      // We've hit the instance limit - increase it or warn
+      console.warn(`⚠️ Hit max instances (${this.maxInstances}), particle may not render`);
+      instanceId = this.maxInstances - 1;
     }
 
     // Create new particle instance
     const particle: Particle = {
       id: '',
+      slot,
       mesh,
       instanceId,
       position: new THREE.Vector3(),
@@ -169,33 +164,28 @@ export class ParticleSystem {
       rotation: new THREE.Euler(),
       rotationSpeed: new THREE.Vector3(),
       lifetime: 0,
-      maxLifetime: 5000,
+      maxLifetime: 10000,
       trade: {} as TradeMessage,
+      locked: false,
+      lockedPosition: new THREE.Vector3(),
     };
 
     this.instanceCounts.set(this.currentShape, instanceId + 1);
-    mesh.count = instanceId + 1;
+    mesh.count = Math.min(instanceId + 1, this.maxInstances);
 
     return particle;
   }
 
   private calculateSpeed(volumeUsd: number): number {
-    // Much faster - particles need to reach center quickly
-    return 0.8 + Math.log10(Math.max(1, volumeUsd)) * 0.1;
+    // Particles fly toward stationary block at center
+    // Speed proportional to volume - bigger trades move faster
+    return 1.5 + Math.log10(Math.max(1, volumeUsd)) * 0.15;
   }
 
   private calculateSize(volumeUsd: number): number {
-    let baseSize: number;
-
-    if (this.focusMode === 'volume') {
-      // Logarithmic scale based on volume - larger base size
-      baseSize = 1.0 + Math.log10(Math.max(1, volumeUsd)) * 0.4;
-    } else {
-      // Uniform size in other modes
-      baseSize = 1.5;
-    }
-
-    return baseSize * this.sizeMultiplier;
+    // ALWAYS proportional to trade volume
+    const baseSize = 0.3 + Math.log10(Math.max(1, volumeUsd)) * 0.5;
+    return Math.min(baseSize * this.sizeMultiplier, 8); // Cap at 8 units
   }
 
   private calculateColor(trade: TradeMessage): number {
@@ -235,7 +225,7 @@ export class ParticleSystem {
     }
   }
 
-  update(deltaTime: number) {
+  update(deltaTime: number, blockBuilder: any) {
     const matrix = new THREE.Matrix4();
     const color = new THREE.Color();
 
@@ -243,24 +233,65 @@ export class ParticleSystem {
       // Update lifetime
       particle.lifetime += deltaTime;
 
-      // Remove if too old
+      // Safety: Only remove if lifetime exceeded (should never happen - cleanup by slot is primary)
       if (particle.lifetime > particle.maxLifetime) {
+        if (Math.random() < 0.01) console.log(`♻️ Removing old particle from slot ${particle.slot}`);
         this.particles.delete(particle.id);
         continue;
       }
 
-      // Update position
-      particle.position.add(
-        particle.velocity.clone().multiplyScalar(deltaTime * 0.1)
-      );
+      // Safety: Remove particles that fell way below the floor
+      if (particle.position.y < -50) {
+        if (Math.random() < 0.01) console.log(`🗑️ Removing fallen particle from slot ${particle.slot}`);
+        this.particles.delete(particle.id);
+        continue;
+      }
 
-      // Update rotation
-      particle.rotation.x += particle.rotationSpeed.x * deltaTime * 0.01;
-      particle.rotation.y += particle.rotationSpeed.y * deltaTime * 0.01;
-      particle.rotation.z += particle.rotationSpeed.z * deltaTime * 0.01;
+      if (!particle.locked) {
+        // Check if this particle's block is sweeping - if so, FORCE LOCK immediately
+        if (blockBuilder.isBlockSweeping(particle.slot)) {
+          const forceLockResult = blockBuilder.forceLockParticle(particle.id, particle.slot, particle.position);
+          if (forceLockResult.locked && forceLockResult.gridPosition) {
+            particle.locked = true;
+            particle.lockedPosition.copy(forceLockResult.gridPosition);
+            particle.velocity.set(0, 0, 0);
+            if (Math.random() < 0.05) {
+              console.log(`⚡ Force-locked particle ${particle.id.slice(0,6)} to sweeping block ${particle.slot}`);
+            }
+          }
+        } else {
+          // Normal behavior: fly toward center and try to lock to forming block
+          const center = new THREE.Vector3(0, 0, 0);
+          const directionToCenter = center.sub(particle.position).normalize();
+          const speed = this.calculateSpeed(particle.trade.vu);
+          particle.velocity.copy(directionToCenter.multiplyScalar(speed));
 
-      // Fade out near end of life
-      const lifeFactor = 1.0 - (particle.lifetime / particle.maxLifetime);
+          // Update position - move toward center
+          particle.position.add(
+            particle.velocity.clone().multiplyScalar(deltaTime * 0.1)
+          );
+
+          // Try to lock into forming block if close enough AND slots match
+          const lockResult = blockBuilder.lockParticle(particle.id, particle.slot, particle.position);
+          if (lockResult.locked && lockResult.gridPosition) {
+            particle.locked = true;
+            particle.lockedPosition.copy(lockResult.gridPosition);
+            particle.velocity.set(0, 0, 0);
+          }
+        }
+      } else {
+        // Locked particles move WITH their block
+        const blockPosition = blockBuilder.getBlockPosition(particle.slot);
+        if (blockPosition) {
+          // Particle world position = block position + relative offset
+          particle.position.copy(blockPosition).add(particle.lockedPosition);
+        }
+      }
+
+      // No rotation - keep particles stable
+
+      // Fade out near end of life (only for unlocked particles)
+      const lifeFactor = particle.locked ? 1.0 : (1.0 - (particle.lifetime / particle.maxLifetime));
 
       // Update instance matrix
       matrix.makeRotationFromEuler(particle.rotation);
@@ -282,6 +313,41 @@ export class ParticleSystem {
         mesh.instanceColor.needsUpdate = true;
       }
     }
+  }
+
+  // Remove ALL particles belonging to a specific slot
+  removeParticlesForSlot(slot: number) {
+    const toRemove: string[] = [];
+    for (const [id, particle] of this.particles) {
+      if (particle.slot === slot) {
+        toRemove.push(id);
+      }
+    }
+
+    console.log(`🗑️ Removing ${toRemove.length} particles for slot ${slot}`);
+    for (const id of toRemove) {
+      this.particles.delete(id);
+    }
+  }
+
+  // Debug: Get particle stats by slot
+  getStats() {
+    let locked = 0;
+    let unlocked = 0;
+    const bySlot = new Map<number, number>();
+
+    for (const p of this.particles.values()) {
+      if (p.locked) locked++;
+      else unlocked++;
+      bySlot.set(p.slot, (bySlot.get(p.slot) || 0) + 1);
+    }
+
+    return {
+      total: this.particles.size,
+      locked,
+      unlocked,
+      slots: Array.from(bySlot.entries()).slice(0, 5) // Show top 5 slots
+    };
   }
 
   getParticlesForBlock(): Particle[] {

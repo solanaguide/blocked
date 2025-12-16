@@ -4,14 +4,23 @@ import type { BlockData, Particle } from '../types';
 export class BlockBuilder {
   private scene: THREE.Scene;
   private activeBlocks: Map<number, BlockMesh> = new Map();
-  private impactEffects: ImpactEffect[] = [];
+  private slotsToCleanup: Set<number> = new Set(); // Slots whose blocks exited screen
 
   constructor(scene: THREE.Scene) {
     this.scene = scene;
   }
 
-  startBlock(blockData: BlockData) {
-    console.log(`🎯 Starting block formation for slot ${blockData.slot}`);
+  startBlock(blockData: BlockData, oldSlot?: number) {
+    console.log(`🎯 Starting NEW block for slot ${blockData.slot}`);
+
+    // Sweep away the old forming block if it exists
+    if (oldSlot !== undefined) {
+      const oldBlock = this.activeBlocks.get(oldSlot);
+      if (oldBlock && oldBlock.phase === 'forming') {
+        console.log(`📦 Sweeping away old block ${oldSlot} with ${oldBlock.lockedParticles.size} particles`);
+        this.sweepBlockAway(oldBlock);
+      }
+    }
 
     // Create block mesh - much larger and more prominent
     const blockSize = Math.min(25, 10 + Math.log10(Math.max(1, blockData.volume)) * 2);
@@ -30,13 +39,16 @@ export class BlockBuilder {
     });
 
     const mesh = new THREE.Mesh(geometry, material);
+
+    // NEW APPROACH: Block spawns at CENTER and stays there while forming
     mesh.position.set(0, 0, 0);
+    console.log(`📦 Block ${blockData.slot} spawned at CENTER (0, 0, 0) - stationary while forming`);
 
     // Add bright edges for visibility
     const edges = new THREE.EdgesGeometry(geometry);
     const lineMaterial = new THREE.LineBasicMaterial({
-      color: 0x06ffa5,
-      linewidth: 3,
+      color: 0x00ffff,  // Bright cyan
+      linewidth: 4,
       transparent: true,
       opacity: 1.0,
     });
@@ -52,25 +64,21 @@ export class BlockBuilder {
       blockData,
       phase: 'forming',
       lifetime: 0,
-      rotation: new THREE.Vector3(
-        (Math.random() - 0.5) * 0.005,  // Much slower rotation
-        (Math.random() - 0.5) * 0.005,
-        (Math.random() - 0.5) * 0.005
-      ),
+      rotation: new THREE.Vector3(0, 0, 0),  // No rotation
+      lockedParticles: new Set(),
+      gridSize: blockSize,
+      gridPositions: new Set(),
     };
-
-    // Remove any old blocks first - only one block at a time!
-    for (const [oldSlot, oldBlock] of this.activeBlocks) {
-      if (oldSlot !== blockData.slot) {
-        this.sweepBlockAway(oldBlock);
-      }
-    }
 
     this.activeBlocks.set(blockData.slot, blockMesh);
   }
 
   private sweepBlockAway(blockMesh: BlockMesh) {
+    // Block is about to sweep away
+    // Signal to instantly lock ALL unlocked particles for this slot
     blockMesh.phase = 'sweeping';
+
+    console.log(`🌊 Block ${blockMesh.blockData.slot} sweeping with ${blockMesh.lockedParticles.size} locked particles (will force-lock remaining)`);
 
     // Create shockwave effect when block completes
     this.createShockwave();
@@ -111,24 +119,124 @@ export class BlockBuilder {
     animate();
   }
 
-  createImpactEffect(position: THREE.Vector3) {
-    // Small flash at impact point
-    const geometry = new THREE.SphereGeometry(0.3, 8, 8);
-    const material = new THREE.MeshBasicMaterial({
-      color: 0x06ffa5,
-      transparent: true,
-      opacity: 1.0,
-    });
+  // Lock a particle into the forming block's grid - only if particle slot matches block slot
+  lockParticle(particleId: string, particleSlot: number, particlePosition: THREE.Vector3): { locked: boolean; gridPosition?: THREE.Vector3 } {
+    // Find the forming block
+    let formingBlock: BlockMesh | undefined;
+    for (const block of this.activeBlocks.values()) {
+      if (block.phase === 'forming') {
+        formingBlock = block;
+        break;
+      }
+    }
 
-    const sphere = new THREE.Mesh(geometry, material);
-    sphere.position.copy(position);
-    this.scene.add(sphere);
+    if (!formingBlock) {
+      return { locked: false };
+    }
 
-    this.impactEffects.push({
-      mesh: sphere,
-      lifetime: 0,
-      maxLifetime: 200,
-    });
+    // Particles can ONLY lock to blocks with matching slot numbers
+    if (particleSlot !== formingBlock.blockData.slot) {
+      return { locked: false };
+    }
+
+    // Block is at center (0, 0, 0), so distance check is simple
+    const blockPos = formingBlock.mesh.position;
+    const distance = particlePosition.distanceTo(blockPos);
+    const lockRadius = formingBlock.gridSize * 0.6; // Particles must get close to lock
+
+    if (distance > lockRadius) {
+      return { locked: false };
+    }
+
+    // Only log occasionally to avoid spam
+    if (Math.random() < 0.02) {
+      console.log(`🔒 Locking particle ${particleId.slice(0,6)} (slot ${particleSlot}) to block at distance ${distance.toFixed(1)}`);
+    }
+
+    // Calculate grid position (snap to grid)
+    const cellSize = 2.5; // Size of each grid cell
+    const gridX = Math.round(particlePosition.x / cellSize) * cellSize;
+    const gridY = Math.round(particlePosition.y / cellSize) * cellSize;
+    const gridZ = Math.round(particlePosition.z / cellSize) * cellSize;
+
+    // Check if this grid position is already occupied
+    const gridKey = `${gridX},${gridY},${gridZ}`;
+    if (formingBlock.gridPositions.has(gridKey)) {
+      // Try nearby positions
+      for (let dx = -1; dx <= 1; dx++) {
+        for (let dy = -1; dy <= 1; dy++) {
+          for (let dz = -1; dz <= 1; dz++) {
+            if (dx === 0 && dy === 0 && dz === 0) continue;
+            const nearX = gridX + dx * cellSize;
+            const nearY = gridY + dy * cellSize;
+            const nearZ = gridZ + dz * cellSize;
+            const nearKey = `${nearX},${nearY},${nearZ}`;
+
+            if (!formingBlock.gridPositions.has(nearKey)) {
+              formingBlock.gridPositions.add(nearKey);
+              formingBlock.lockedParticles.add(particleId);
+              return {
+                locked: true,
+                gridPosition: new THREE.Vector3(nearX, nearY, nearZ)
+              };
+            }
+          }
+        }
+      }
+      return { locked: false }; // No space found
+    }
+
+    // Lock particle to this grid position
+    formingBlock.gridPositions.add(gridKey);
+    formingBlock.lockedParticles.add(particleId);
+
+    return {
+      locked: true,
+      gridPosition: new THREE.Vector3(gridX, gridY, gridZ)
+    };
+  }
+
+  // Get the block position for a given slot (so locked particles can move with their block)
+  getBlockPosition(slot: number): THREE.Vector3 | null {
+    const block = this.activeBlocks.get(slot);
+    return block ? block.mesh.position.clone() : null;
+  }
+
+  // Check if a particle is locked
+  isParticleLocked(particleId: string): boolean {
+    const currentBlock = Array.from(this.activeBlocks.values())[0];
+    return currentBlock ? currentBlock.lockedParticles.has(particleId) : false;
+  }
+
+  // Check if we have a forming block for a given slot
+  hasFormingBlockForSlot(slot: number): boolean {
+    const block = this.activeBlocks.get(slot);
+    return block !== undefined && block.phase === 'forming';
+  }
+
+  // Check if a block is sweeping
+  isBlockSweeping(slot: number): boolean {
+    const block = this.activeBlocks.get(slot);
+    return block !== undefined && block.phase === 'sweeping';
+  }
+
+  // Force-lock a particle to a sweeping block (no distance check)
+  forceLockParticle(particleId: string, particleSlot: number, particlePosition: THREE.Vector3): { locked: boolean; gridPosition?: THREE.Vector3 } {
+    const block = this.activeBlocks.get(particleSlot);
+    if (!block) {
+      return { locked: false };
+    }
+
+    const blockPos = block.mesh.position;
+    // Calculate relative position to block
+    const relativePos = particlePosition.clone().sub(blockPos);
+
+    block.lockedParticles.add(particleId);
+
+    return {
+      locked: true,
+      gridPosition: relativePos
+    };
   }
 
   update(deltaTime: number) {
@@ -137,62 +245,48 @@ export class BlockBuilder {
       block.lifetime += deltaTime;
 
       if (block.phase === 'forming') {
-        // Rotate while forming
-        block.mesh.rotation.x += block.rotation.x * deltaTime;
-        block.mesh.rotation.y += block.rotation.y * deltaTime;
-        block.mesh.rotation.z += block.rotation.z * deltaTime;
-
-        // Gentle pulse effect
-        const pulse = Math.sin(block.lifetime * 0.002) * 0.05 + 1;
-        block.mesh.scale.set(pulse, pulse, pulse);
+        // NEW APPROACH: Forming blocks are STATIONARY at center (0, 0, 0)
+        // They don't move until they transition to 'sweeping'
+        // No movement, no rotation - just stable block accepting particles
       }
 
       if (block.phase === 'sweeping') {
-        // Sweep block off to the right and fade
+        // Sweep block off to the right with its locked particles
         block.mesh.position.x += deltaTime * 0.3;
-        block.mesh.position.y += deltaTime * 0.05;
 
         // Fade both the solid material and wireframe
         const solidOpacity = (block.mesh.material as THREE.MeshStandardMaterial).opacity;
-        (block.mesh.material as THREE.MeshStandardMaterial).opacity = solidOpacity * 0.95;
+        (block.mesh.material as THREE.MeshStandardMaterial).opacity = solidOpacity * 0.98;
 
         const wireframeMat = block.wireframe.material as THREE.LineBasicMaterial;
-        wireframeMat.opacity *= 0.95;
+        wireframeMat.opacity *= 0.98;
 
-        // Keep rotating slowly
-        block.mesh.rotation.x += block.rotation.x * deltaTime * 2;
-        block.mesh.rotation.y += block.rotation.y * deltaTime * 2;
-        block.mesh.rotation.z += block.rotation.z * deltaTime * 2;
+        // No rotation - keep it stable
 
-        // Remove block after it's off screen or faded
-        if (block.mesh.position.x > 100 || wireframeMat.opacity < 0.1) {
+        // Remove block after it's off screen
+        if (block.mesh.position.x > 120) {
+          console.log(`🗑️ Removing block ${slot} at position ${block.mesh.position.x}`);
           this.scene.remove(block.mesh);
           block.mesh.geometry.dispose();
           (block.mesh.material as THREE.Material).dispose();
           wireframeMat.dispose();
+          block.wireframe.geometry.dispose();
+
           this.activeBlocks.delete(slot);
+
+          // Signal to remove ALL particles for this slot
+          this.slotsToCleanup.add(slot);
         }
       }
     }
 
-    // Update impact effects
-    for (let i = this.impactEffects.length - 1; i >= 0; i--) {
-      const effect = this.impactEffects[i];
-      effect.lifetime += deltaTime;
+  }
 
-      // Scale up and fade
-      const progress = effect.lifetime / effect.maxLifetime;
-      const scale = 1 + progress * 2;
-      effect.mesh.scale.set(scale, scale, scale);
-      (effect.mesh.material as THREE.MeshBasicMaterial).opacity = 1 - progress;
-
-      if (effect.lifetime > effect.maxLifetime) {
-        this.scene.remove(effect.mesh);
-        effect.mesh.geometry.dispose();
-        (effect.mesh.material as THREE.Material).dispose();
-        this.impactEffects.splice(i, 1);
-      }
-    }
+  // Get slots that need particle cleanup (block exited screen)
+  getSlotsToCleanup(): Set<number> {
+    const slots = this.slotsToCleanup;
+    this.slotsToCleanup = new Set();
+    return slots;
   }
 }
 
@@ -203,11 +297,8 @@ interface BlockMesh {
   phase: 'forming' | 'sweeping';
   lifetime: number;
   rotation: THREE.Vector3;
-}
-
-interface ImpactEffect {
-  mesh: THREE.Mesh;
-  lifetime: number;
-  maxLifetime: number;
+  lockedParticles: Set<string>;  // IDs of particles locked into this block
+  gridSize: number;  // Size of the block for grid calculations
+  gridPositions: Set<string>;  // Occupied grid positions (x,y,z keys)
 }
 

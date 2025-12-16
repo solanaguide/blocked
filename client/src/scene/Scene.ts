@@ -73,8 +73,21 @@ export class Scene {
 
     // Update subsystems
     this.environment.update(time);
-    this.particleSystem.update(deltaTime);
+    this.particleSystem.update(deltaTime, this.blockBuilder);
     this.blockBuilder.update(deltaTime);
+
+    // Clean up all particles for blocks that finished sweeping and exited screen
+    const slotsToCleanup = this.blockBuilder.getSlotsToCleanup();
+    for (const slot of slotsToCleanup) {
+      this.particleSystem.removeParticlesForSlot(slot);
+    }
+
+    // Debug logging every 3 seconds
+    if (Math.floor(time / 3000) !== Math.floor(this.lastTime / 3000)) {
+      const stats = this.particleSystem.getStats();
+      const slotInfo = stats.slots.map(([slot, count]) => `${slot}:${count}`).join(', ');
+      console.log(`📊 Particles: ${stats.total} total (${stats.locked} locked, ${stats.unlocked} unlocked) | Slots: ${slotInfo}`);
+    }
 
     // Render
     this.renderer.render(this.scene, this.camera);
@@ -83,44 +96,37 @@ export class Scene {
   }
 
   addTrade(trade: TradeMessage) {
-    this.particleSystem.addTrade(trade);
-
-    // Create impact effect at a random position near center
-    const angle = Math.random() * Math.PI * 2;
-    const radius = Math.random() * 5;
-    const impactPos = new THREE.Vector3(
-      Math.cos(angle) * radius,
-      (Math.random() - 0.5) * 3,
-      Math.sin(angle) * radius
-    );
-    this.blockBuilder.createImpactEffect(impactPos);
-
-    // Update current slot
+    // Check for slot change FIRST, before spawning particle
     if (trade.s !== this.currentSlot && this.currentSlot !== 0) {
-      // New block!
-      this.onBlockComplete(this.currentSlot);
+      // New slot detected! Complete old block and start new one
+      console.log(`🔄 Slot change detected: ${this.currentSlot} → ${trade.s}`);
+      this.onBlockComplete(this.currentSlot, trade.s);
     }
     this.currentSlot = trade.s;
+
+    // ALWAYS spawn particle for every trade - no skipping!
+    this.particleSystem.addTrade(trade, trade.s);
   }
 
-  onBlockComplete(slot: number) {
+  onBlockComplete(oldSlot: number, newSlot: number) {
     const particles = this.particleSystem.getParticlesForBlock();
 
-    // Calculate block stats (would come from server ideally)
+    // Calculate block stats
     let totalVolume = 0;
     for (const p of particles) {
       totalVolume += p.trade.vu;
     }
 
     const blockData: BlockData = {
-      slot,
+      slot: newSlot,  // The NEW slot for the new block
       trades: particles.length,
       volume: totalVolume,
       timestamp: Date.now(),
       particles,
     };
 
-    this.blockBuilder.startBlock(blockData);
+    // Start new block - this will trigger sweeping of old blocks
+    this.blockBuilder.startBlock(blockData, oldSlot);
     this.blockStartTime = Date.now();
   }
 

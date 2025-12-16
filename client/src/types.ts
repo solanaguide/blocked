@@ -5,6 +5,7 @@ export type ParticleShape = 'cube' | 'octahedron' | 'tetrahedron' | 'sphere' | '
 
 export interface Particle {
   id: string;
+  slot: number;  // Which slot/block does this particle belong to?
   mesh: THREE.InstancedMesh;
   instanceId: number;
   position: THREE.Vector3;
@@ -16,6 +17,8 @@ export interface Particle {
   lifetime: number;
   maxLifetime: number;
   trade: import('../../shared/types').TradeMessage;
+  locked: boolean;  // Is this particle locked into a block?
+  lockedPosition: THREE.Vector3;  // Grid position when locked
 }
 
 export interface BlockData {
