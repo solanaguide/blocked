@@ -57,11 +57,11 @@ export class ParticleSystem {
 
   private createMaterial() {
     this.material = new THREE.MeshStandardMaterial({
-      metalness: 0.8,
-      roughness: 0.2,
-      emissive: 0x000000, // No base emissive - use per-instance colors
-      emissiveIntensity: 0.3,
-      vertexColors: true, // CRITICAL: Enable per-instance colors
+      metalness: 0.3,
+      roughness: 0.3,
+      emissive: 0xffffff, // White emissive - colors will tint this
+      emissiveIntensity: 0.8, // High intensity for glow
+      vertexColors: true, // Per-instance colors
     });
   }
 
@@ -108,9 +108,9 @@ export class ParticleSystem {
     const blockSize = 30; // Block size (must match BlockBuilder)
     const spawnHeight = 25 + Math.random() * 10; // 25-35 units above center
 
-    // Random position within block's X/Z footprint (so they fall INTO the block)
-    const spreadX = (Math.random() - 0.5) * blockSize * 0.8;
-    const spreadZ = (Math.random() - 0.5) * blockSize * 0.8;
+    // Random position within block's X/Z footprint - FULL spread to fill entire volume
+    const spreadX = (Math.random() - 0.5) * blockSize * 1.0; // Full width
+    const spreadZ = (Math.random() - 0.5) * blockSize * 1.0; // Full depth
 
     const position = new THREE.Vector3(
       spreadX,
@@ -118,12 +118,12 @@ export class ParticleSystem {
       spreadZ
     );
 
-    // Velocity: primarily downward (gravity-like), slight inward drift
+    // Velocity: primarily downward (gravity-like), minimal drift to preserve spread
     const speed = this.calculateSpeed(trade.vu);
     const velocity = new THREE.Vector3(
-      -spreadX * 0.05, // Slight drift toward center X
+      -spreadX * 0.01, // Very slight drift toward center X - keep spread!
       -speed,          // Downward (rain down)
-      -spreadZ * 0.05  // Slight drift toward center Z
+      -spreadZ * 0.01  // Very slight drift toward center Z - keep spread!
     );
 
     // Calculate size
@@ -280,15 +280,15 @@ export class ParticleSystem {
             particle.velocity.clone().multiplyScalar(deltaTime * 0.05) // Slower fall for visibility
           );
 
-          // CONTAINER LOGIC: Only lock when particle has fallen INTO the block
-          // Block is at (0,0,0) with size 30, so y ranges from -15 to +15
-          // We want particles to fall BELOW the top and settle on the BOTTOM
-          // Lock when: particle is INSIDE the block's X/Z footprint AND has fallen to bottom half
+          // CONTAINER LOGIC: Lock when particle has fallen deep into the block
+          // Block is at (0,0,0) with size 30, so ranges from -15 to +15 in all directions
+          // Lock when: particle is INSIDE the block's X/Z footprint AND has fallen far enough
 
           const blockHalfSize = 15;
           const isInsideXZ = Math.abs(particle.position.x) < blockHalfSize &&
                              Math.abs(particle.position.z) < blockHalfSize;
-          const hasFallenInside = particle.position.y < 0; // Below center plane, in bottom half
+          // Lock when particle has fallen into lower portion - but higher than before for fuller look
+          const hasFallenInside = particle.position.y < 5; // Lock once fallen to middle/lower area
 
           // Stop particles from falling through the bottom
           if (particle.position.y < -blockHalfSize) {
@@ -331,8 +331,8 @@ export class ParticleSystem {
 
       particle.mesh.setMatrixAt(particle.instanceId, matrix);
 
-      // Set color with brightness boost for visibility
-      const brightColor = particle.color.clone().multiplyScalar(1.5);
+      // Set color - VERY BRIGHT for vibrant vaporwave look
+      const brightColor = particle.color.clone().multiplyScalar(3.0); // 3x brightness!
       particle.mesh.setColorAt(particle.instanceId, brightColor);
     }
 
