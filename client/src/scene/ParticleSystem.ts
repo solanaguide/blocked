@@ -56,13 +56,11 @@ export class ParticleSystem {
   }
 
   private createMaterial() {
-    this.material = new THREE.MeshStandardMaterial({
-      metalness: 0.3,
-      roughness: 0.3,
-      emissive: 0xffffff, // White emissive - colors will tint this
-      emissiveIntensity: 0.8, // High intensity for glow
+    // Use MeshBasicMaterial for pure colors without lighting interference
+    this.material = new THREE.MeshBasicMaterial({
       vertexColors: true, // Per-instance colors
-    });
+      toneMapped: false,  // Prevent color washing
+    }) as any; // Cast to MeshStandardMaterial type for compatibility
   }
 
   private createInstancedMeshes() {
@@ -280,30 +278,35 @@ export class ParticleSystem {
             particle.velocity.clone().multiplyScalar(deltaTime * 0.05) // Slower fall for visibility
           );
 
-          // CONTAINER LOGIC: Lock when particle has fallen deep into the block
-          // Block is at (0,0,0) with size 30, so ranges from -15 to +15 in all directions
-          // Lock when: particle is INSIDE the block's X/Z footprint AND has fallen far enough
-
+          // PHYSICS-STYLE STACKING: Check if particle should land on other particles
           const blockHalfSize = 15;
           const isInsideXZ = Math.abs(particle.position.x) < blockHalfSize &&
                              Math.abs(particle.position.z) < blockHalfSize;
-          // Lock when particle has fallen into lower portion - but higher than before for fuller look
-          const hasFallenInside = particle.position.y < 5; // Lock once fallen to middle/lower area
+
+          if (isInsideXZ) {
+            // Get height of stack at this X/Z position
+            const cellSize = 4.0;
+            const stackHeight = blockBuilder.getStackHeightAt(particle.slot, particle.position.x, particle.position.z, cellSize);
+            const landingHeight = stackHeight + cellSize; // Land on top of stack
+
+            // Check if particle has reached landing height
+            if (particle.position.y <= landingHeight) {
+              // Particle should lock here - either on floor or on top of other particles
+              particle.position.y = landingHeight; // Snap to landing height
+
+              const lockResult = blockBuilder.lockParticle(particle.id, particle.slot, particle.position);
+              if (lockResult.locked && lockResult.gridPosition) {
+                particle.locked = true;
+                particle.lockedPosition.copy(lockResult.gridPosition);
+                particle.velocity.set(0, 0, 0);
+              }
+            }
+          }
 
           // Stop particles from falling through the bottom
           if (particle.position.y < -blockHalfSize) {
             particle.position.y = -blockHalfSize;
-            particle.velocity.y = 0; // Stop falling
-          }
-
-          if (isInsideXZ && hasFallenInside) {
-            // Particle is inside container and has settled to bottom - lock it
-            const lockResult = blockBuilder.lockParticle(particle.id, particle.slot, particle.position);
-            if (lockResult.locked && lockResult.gridPosition) {
-              particle.locked = true;
-              particle.lockedPosition.copy(lockResult.gridPosition);
-              particle.velocity.set(0, 0, 0);
-            }
+            particle.velocity.y = 0;
           }
         }
       } else {
@@ -331,9 +334,8 @@ export class ParticleSystem {
 
       particle.mesh.setMatrixAt(particle.instanceId, matrix);
 
-      // Set color - VERY BRIGHT for vibrant vaporwave look
-      const brightColor = particle.color.clone().multiplyScalar(3.0); // 3x brightness!
-      particle.mesh.setColorAt(particle.instanceId, brightColor);
+      // Set color - pure vibrant colors (no multiplier needed with MeshBasicMaterial)
+      particle.mesh.setColorAt(particle.instanceId, particle.color);
     }
 
     // Update all meshes

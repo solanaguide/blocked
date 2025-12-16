@@ -240,6 +240,36 @@ export class BlockBuilder {
     };
   }
 
+  // Get height of stacked particles at a given X/Z position (for collision)
+  getStackHeightAt(slot: number, x: number, z: number, cellSize: number): number {
+    const block = this.activeBlocks.get(slot);
+    if (!block) return -15; // Bottom of empty block
+
+    // Find highest particle in this X/Z grid cell
+    let maxY = -15; // Start at bottom of block
+    const gridX = Math.round(x / cellSize) * cellSize;
+    const gridZ = Math.round(z / cellSize) * cellSize;
+
+    // Check this cell and adjacent cells for stack height
+    for (let dx = -1; dx <= 1; dx++) {
+      for (let dz = -1; dz <= 1; dz++) {
+        const checkX = gridX + dx * cellSize;
+        const checkZ = gridZ + dz * cellSize;
+
+        // Search through occupied grid positions
+        for (let dy = -3; dy <= 3; dy++) { // Check vertical range
+          const checkY = dy * cellSize;
+          const key = `${checkX},${checkY},${checkZ}`;
+          if (block.gridPositions.has(key)) {
+            maxY = Math.max(maxY, checkY);
+          }
+        }
+      }
+    }
+
+    return maxY;
+  }
+
   update(deltaTime: number) {
     // Update blocks
     for (const [slot, block] of this.activeBlocks) {
