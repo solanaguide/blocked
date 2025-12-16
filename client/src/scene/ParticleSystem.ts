@@ -17,7 +17,7 @@ export class ParticleSystem {
   private maxInstances = 10000; // Increased for high-throughput scenarios
 
   private currentShape: ParticleShape = 'cube';
-  private focusMode: FocusMode = 'volume';
+  private focusMode: FocusMode = 'program'; // Default to program for more color variety
   private sizeMultiplier = 1.0;
 
   // Program colors (vaporwave palette)
@@ -205,11 +205,14 @@ export class ParticleSystem {
         return this.tokenColors.get(trade.ta) || this.hashColor(trade.ta);
 
       case 'volume':
-        // Heat map: blue -> purple -> pink -> red
-        if (trade.vu < 100) return 0x0099ff;      // Blue
-        if (trade.vu < 1000) return 0x8b5cf6;     // Purple
-        if (trade.vu < 10000) return 0xff006e;    // Pink
-        return 0xff3333;                           // Red
+        // Heat map: blue -> cyan -> purple -> pink -> red
+        // Adjusted thresholds for better distribution
+        if (trade.vu < 10) return 0x00ffff;       // Cyan (micro trades)
+        if (trade.vu < 50) return 0x0099ff;       // Blue
+        if (trade.vu < 200) return 0x8b5cf6;      // Purple
+        if (trade.vu < 1000) return 0xff1493;     // Deep Pink
+        if (trade.vu < 5000) return 0xff006e;     // Hot Pink
+        return 0xff3333;                           // Red (whales)
 
       case 'free':
       default:
