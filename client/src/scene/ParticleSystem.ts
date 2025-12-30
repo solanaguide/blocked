@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import type { TradeMessage } from '../../../shared/types';
 import type { Particle, ParticleShape, FocusMode } from '../types';
-import { programColors, tokenColors, hashColor } from '../utils/colors';
+import { programColors, tokenColors, hashColor, volumeHeatmap } from '../utils/colors';
 
 export class ParticleSystem {
   private scene: THREE.Scene;
@@ -239,14 +239,8 @@ export class ParticleSystem {
         return color;
 
       case 'volume':
-        // Heat map: blue -> cyan -> purple -> pink -> red
-        // Adjusted thresholds for better distribution
-        if (trade.vu < 10) color = 0x00ffff;       // Cyan (micro trades)
-        else if (trade.vu < 50) color = 0x0099ff;  // Blue
-        else if (trade.vu < 200) color = 0x8b5cf6; // Purple
-        else if (trade.vu < 1000) color = 0xff1493; // Deep Pink
-        else if (trade.vu < 5000) color = 0xff006e; // Hot Pink
-        else color = 0xff3333;                      // Red (whales)
+        // Smooth gradient heatmap based on trade volume
+        color = volumeHeatmap(trade.vu);
 
         if (Math.random() < 0.01) {
           console.log(`🎨 VOLUME mode: $${trade.vu.toFixed(2)} → 0x${color.toString(16)}`);
