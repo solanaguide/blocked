@@ -5,8 +5,15 @@ import type { TradeMessage } from '../../../shared/types';
 import type { BlockData } from '../types';
 
 /**
- * HeatmapGrid - 3D grid with cells representing program x token combinations
- * Height and color = volume
+ * HeatmapGrid - 3D matrix showing program × token trading volume
+ *
+ * CONCEPT: Each cell on the grid represents a program-token pair (e.g. "Jupiter-SOL").
+ * - Cell HEIGHT = trade volume for that pair (logarithmic scale)
+ * - Cell COLOR = volume heatmap (blue=low → purple → pink → red=high)
+ * - Rows = Programs (JUP, RAYDIUM, ORCA, etc.)
+ * - Columns = Tokens (SOL, USDC, USDT)
+ * - Block change triggers wave ripple across grid
+ * - Cells decay over time showing real-time activity
  */
 export class HeatmapGrid extends BaseVisualization {
   private cells: Map<string, GridCell> = new Map();
@@ -43,10 +50,10 @@ export class HeatmapGrid extends BaseVisualization {
         const z = startZ + j * cellSpacing;
 
         const geometry = new THREE.BoxGeometry(3, 0.1, 3);
-        const color = programColors.get(program) || 0x8b5cf6;
+        // Start with default low-volume color (will update based on activity)
         const material = new THREE.MeshStandardMaterial({
-          color: color,
-          emissive: color,
+          color: 0x0044ff, // Start blue (low volume)
+          emissive: 0x0044ff,
           emissiveIntensity: 0.3,
           metalness: 0.8,
           roughness: 0.2,

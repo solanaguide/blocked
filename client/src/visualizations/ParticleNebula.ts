@@ -5,15 +5,22 @@ import type { TradeMessage } from '../../../shared/types';
 import type { BlockData } from '../types';
 
 /**
- * ParticleNebula - Cloud of glowing particles
- * Position based on program/token clustering, size based on volume
+ * ParticleNebula - Cloud of glowing particles in 3D space
+ *
+ * CONCEPT: Floating particle cloud where each trade spawns a glowing particle.
+ * Particles cluster around their program's region in 3D space and drift slowly.
+ * Larger trades = bigger, brighter particles. On block change, all particles
+ * experience a gravitational collapse toward their cluster centers (like a supernova).
+ *
+ * PERFORMANCE: Limits to 200 particles, uses single shared light instead of per-particle lights.
  */
 export class ParticleNebula extends BaseVisualization {
   private particles: NebulaParticle[] = [];
   private programClusters: Map<string, THREE.Vector3> = new Map();
   private gravitationalCollapse: number = 0;
   private cameraAngle: number = 0;
-  private maxParticles = 500;
+  private maxParticles = 200; // Reduced from 500 for performance
+  private sharedLight: THREE.PointLight; // Single light instead of per-particle
 
   constructor() {
     super();
@@ -37,6 +44,10 @@ export class ParticleNebula extends BaseVisualization {
     // Ambient lighting
     const ambientLight = new THREE.AmbientLight(0x8b5cf6, 0.2);
     this.scene.add(ambientLight);
+
+    // Single shared light for all particles (performance optimization)
+    this.sharedLight = new THREE.PointLight(0xff006e, 3, 100);
+    this.scene.add(this.sharedLight);
 
     // Background stars
     this.createStarfield();
@@ -108,12 +119,7 @@ export class ParticleNebula extends BaseVisualization {
     const mesh = new THREE.Mesh(geometry, material);
     mesh.position.copy(position);
 
-    // Add point light for glow
-    const light = new THREE.PointLight(color, volume / 10000, 20);
-    light.position.copy(position);
-
     this.scene.add(mesh);
-    this.scene.add(light);
 
     // Random drift velocity
     const velocity = new THREE.Vector3(
@@ -124,19 +130,17 @@ export class ParticleNebula extends BaseVisualization {
 
     this.particles.push({
       mesh,
-      light,
       velocity,
-      lifetime: 8000,
+      lifetime: 6000, // Reduced from 8000
       age: 0,
       program,
       clusterPos,
     });
 
-    // Limit particle count
+    // Limit particle count for performance
     while (this.particles.length > this.maxParticles) {
       const oldest = this.particles.shift()!;
       this.scene.remove(oldest.mesh);
-      this.scene.remove(oldest.light);
       oldest.mesh.geometry.dispose();
       (oldest.mesh.material as THREE.Material).dispose();
     }
@@ -158,14 +162,12 @@ export class ParticleNebula extends BaseVisualization {
 
       // Drift movement
       particle.mesh.position.add(particle.velocity);
-      particle.light.position.copy(particle.mesh.position);
 
       // Gravitational attraction to cluster during collapse
       if (this.gravitationalCollapse > 0) {
         const toCluster = new THREE.Vector3().subVectors(particle.clusterPos, particle.mesh.position);
         toCluster.multiplyScalar(this.gravitationalCollapse * 0.01);
         particle.mesh.position.add(toCluster);
-        particle.light.position.copy(particle.mesh.position);
       }
 
       // Subtle orbital rotation around cluster
@@ -177,7 +179,6 @@ export class ParticleNebula extends BaseVisualization {
 
       particle.mesh.position.x = particle.clusterPos.x + rotatedX;
       particle.mesh.position.z = particle.clusterPos.z + rotatedZ;
-      particle.light.position.copy(particle.mesh.position);
 
       // Pulse
       const pulseScale = 1 + Math.sin(time * 2 + index * 0.5) * 0.1;
@@ -188,18 +189,24 @@ export class ParticleNebula extends BaseVisualization {
       if (particle.age > fadeStart) {
         const fadeProgress = (particle.age - fadeStart) / (particle.lifetime - fadeStart);
         (particle.mesh.material as THREE.MeshStandardMaterial).opacity = 1 - fadeProgress;
-        particle.light.intensity *= 0.98;
       }
 
       // Remove old particles
       if (particle.age > particle.lifetime) {
         this.scene.remove(particle.mesh);
-        this.scene.remove(particle.light);
         particle.mesh.geometry.dispose();
         (particle.mesh.material as THREE.Material).dispose();
         this.particles.splice(index, 1);
       }
     });
+
+    // Update shared light position to brightest particle cluster
+    if (this.particles.length > 0) {
+      const avgX = this.particles.reduce((sum, p) => sum + p.mesh.position.x, 0) / this.particles.length;
+      const avgY = this.particles.reduce((sum, p) => sum + p.mesh.position.y, 0) / this.particles.length;
+      const avgZ = this.particles.reduce((sum, p) => sum + p.mesh.position.z, 0) / this.particles.length;
+      this.sharedLight.position.set(avgX, avgY, avgZ);
+    }
 
     // Decay gravitational collapse
     if (this.gravitationalCollapse > 0) {
@@ -218,7 +225,6 @@ export class ParticleNebula extends BaseVisualization {
   dispose(): void {
     this.particles.forEach(particle => {
       this.scene.remove(particle.mesh);
-      this.scene.remove(particle.light);
       particle.mesh.geometry.dispose();
       (particle.mesh.material as THREE.Material).dispose();
     });
@@ -230,7 +236,6 @@ export class ParticleNebula extends BaseVisualization {
 
 interface NebulaParticle {
   mesh: THREE.Mesh;
-  light: THREE.PointLight;
   velocity: THREE.Vector3;
   lifetime: number;
   age: number;
