@@ -1,6 +1,8 @@
 import { SceneManager } from './core/SceneManager';
 import { DataProcessor } from './data/DataProcessor';
 import { BlockVisualization } from './visualizations/BlockVisualization';
+import { FrequencyBars } from './visualizations/FrequencyBars';
+import { WaveformHorizon } from './visualizations/WaveformHorizon';
 import { HUD } from './hud/HUD';
 import type { WSMessage, BatchMessage, BlockCompleteMessage, StatsMessage } from '../../shared/types';
 import type { FocusMode, ParticleShape } from './types';
@@ -13,6 +15,8 @@ const hud = new HUD();
 
 // Register visualizations
 sceneManager.registerScene('blocks', () => new BlockVisualization());
+sceneManager.registerScene('frequency', () => new FrequencyBars());
+sceneManager.registerScene('waveform', () => new WaveformHorizon());
 
 // Start with blocks visualization
 sceneManager.switchScene('blocks');
