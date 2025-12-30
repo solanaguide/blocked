@@ -62,9 +62,7 @@ export abstract class BaseVisualization implements IVisualization {
     // Append renderer
     container.appendChild(this.renderer.domElement);
 
-    // Start animation loop
-    this.animate();
-
+    // NOTE: Animation loop is managed by SceneManager, not here
     console.log(`✨ ${this.getName()} initialized`);
   }
 
@@ -117,25 +115,9 @@ export abstract class BaseVisualization implements IVisualization {
   }
 
   /**
-   * Animation loop
+   * Render the scene (called by SceneManager after update)
    */
-  private animate(): void {
-    if (!this.container) return; // Stop animating if disposed
-
-    requestAnimationFrame(this.animate.bind(this));
-
-    let deltaTime = this.clock.getDelta() * 1000; // Convert to ms
-
-    // CAP deltaTime to prevent huge jumps when tab becomes active
-    const MAX_DELTA = 100; // Cap at 100ms (~10fps minimum)
-    if (deltaTime > MAX_DELTA) {
-      deltaTime = MAX_DELTA;
-    }
-
-    // Call subclass update
-    this.update(deltaTime);
-
-    // Render scene
+  render(): void {
     this.renderer.render(this.scene, this.camera);
   }
 
