@@ -2,8 +2,12 @@ import * as d3 from 'd3';
 
 export class HUD {
   private volumeHistory: { time: number; volume: number }[] = [];
-  private tpsHistory: { time: number; tps: number }[] = [];
+  private spsHistory: { time: number; sps: number }[] = [];
   private maxHistoryLength = 60; // 60 seconds
+
+  private blockVolumeHistory: { slot: number; volume: number }[] = [];
+  private blockSwapsHistory: { slot: number; swaps: number }[] = [];
+  private chartMode: 'persecond' | 'perblock' = 'persecond';
 
   private programStats: Map<string, number> = new Map();
   private tokenStats: Map<string, number> = new Map();
@@ -15,11 +19,11 @@ export class HUD {
   private setupCharts() {
     // Volume chart
     const volumeChart = d3.select('#volume-chart');
-    const tpsChart = d3.select('#tps-chart');
+    const spsChart = d3.select('#sps-chart');
 
     // Initial empty state
     this.updateVolumeChart();
-    this.updateTPSChart();
+    this.updateSPSChart();
   }
 
   updateBlockProgress(progress: number) {
@@ -54,25 +58,25 @@ export class HUD {
     }
   }
 
-  addChartDataPoint(trades: number, volume: number) {
+  addChartDataPoint(swaps: number, volume: number) {
     // Add per-second data point to history
     const now = Date.now();
     this.volumeHistory.push({ time: now, volume });
-    this.tpsHistory.push({ time: now, tps: trades });
+    this.spsHistory.push({ time: now, sps: swaps });
 
     // Trim history to 60 seconds
     const cutoff = now - 60000;
     this.volumeHistory = this.volumeHistory.filter(d => d.time > cutoff);
-    this.tpsHistory = this.tpsHistory.filter(d => d.time > cutoff);
+    this.spsHistory = this.spsHistory.filter(d => d.time > cutoff);
 
     // Update charts
     this.updateVolumeChart();
-    this.updateTPSChart();
+    this.updateSPSChart();
   }
 
-  updateTPS(tps: number) {
-    const elem = document.getElementById('tps');
-    if (elem) elem.textContent = tps.toFixed(1);
+  updateSPS(sps: number) {
+    const elem = document.getElementById('sps');
+    if (elem) elem.textContent = sps.toFixed(1);
   }
 
   updateMode(mode: string) {
@@ -172,8 +176,16 @@ export class HUD {
     const svg = d3.select('#volume-chart');
     svg.selectAll('*').remove();
 
-    if (this.volumeHistory.length === 0) return;
+    if (this.chartMode === 'perblock') {
+      if (this.blockVolumeHistory.length === 0) return;
+      this.renderBlockVolumeChart(svg);
+    } else {
+      if (this.volumeHistory.length === 0) return;
+      this.renderPerSecondVolumeChart(svg);
+    }
+  }
 
+  private renderPerSecondVolumeChart(svg: d3.Selection<d3.BaseType, unknown, HTMLElement, any>) {
     const width = 420;
     const height = 110;
     const margin = { top: 5, right: 40, bottom: 15, left: 5 };
@@ -222,46 +234,91 @@ export class HUD {
       .text(`$${this.formatNumber(maxVolume)}`);
   }
 
-  private updateTPSChart() {
-    const svg = d3.select('#tps-chart');
-    svg.selectAll('*').remove();
-
-    if (this.tpsHistory.length === 0) return;
-
+  private renderBlockVolumeChart(svg: d3.Selection<d3.BaseType, unknown, HTMLElement, any>) {
     const width = 420;
     const height = 110;
     const margin = { top: 5, right: 40, bottom: 15, left: 5 };
 
-    const maxTPS = d3.max(this.tpsHistory, d => d.tps) || 1;
+    const maxVolume = d3.max(this.blockVolumeHistory, d => d.volume) || 1;
 
-    const x = d3.scaleTime()
-      .domain(d3.extent(this.tpsHistory, d => d.time) as [number, number])
+    const x = d3.scaleLinear()
+      .domain([0, this.blockVolumeHistory.length])
       .range([margin.left, width - margin.right]);
 
     const y = d3.scaleLinear()
-      .domain([0, maxTPS])
+      .domain([0, maxVolume])
       .range([height - margin.bottom, margin.top]);
 
-    const line = d3.line<{ time: number; tps: number }>()
+    // Draw bars (flame chart style)
+    const barWidth = (width - margin.left - margin.right) / Math.max(this.blockVolumeHistory.length, 1);
+
+    this.blockVolumeHistory.forEach((d, i) => {
+      svg.append('rect')
+        .attr('x', x(i))
+        .attr('y', y(d.volume))
+        .attr('width', Math.max(barWidth - 1, 1))
+        .attr('height', height - margin.bottom - y(d.volume))
+        .attr('fill', '#8b5cf6')
+        .attr('opacity', 0.7);
+    });
+
+    // Add max value label
+    svg.append('text')
+      .attr('x', width - margin.right + 5)
+      .attr('y', margin.top + 10)
+      .attr('fill', '#8b5cf6')
+      .attr('font-size', '10px')
+      .text(`$${this.formatNumber(maxVolume)}`);
+  }
+
+  private updateSPSChart() {
+    const svg = d3.select('#sps-chart');
+    svg.selectAll('*').remove();
+
+    if (this.chartMode === 'perblock') {
+      if (this.blockSwapsHistory.length === 0) return;
+      this.renderBlockSPSChart(svg);
+    } else {
+      if (this.spsHistory.length === 0) return;
+      this.renderPerSecondSPSChart(svg);
+    }
+  }
+
+  private renderPerSecondSPSChart(svg: d3.Selection<d3.BaseType, unknown, HTMLElement, any>) {
+    const width = 420;
+    const height = 110;
+    const margin = { top: 5, right: 40, bottom: 15, left: 5 };
+
+    const maxSPS = d3.max(this.spsHistory, d => d.sps) || 1;
+
+    const x = d3.scaleTime()
+      .domain(d3.extent(this.spsHistory, d => d.time) as [number, number])
+      .range([margin.left, width - margin.right]);
+
+    const y = d3.scaleLinear()
+      .domain([0, maxSPS])
+      .range([height - margin.bottom, margin.top]);
+
+    const line = d3.line<{ time: number; sps: number }>()
       .x(d => x(d.time))
-      .y(d => y(d.tps))
+      .y(d => y(d.sps))
       .curve(d3.curveMonotoneX);
 
-    const area = d3.area<{ time: number; tps: number }>()
+    const area = d3.area<{ time: number; sps: number }>()
       .x(d => x(d.time))
       .y0(height - margin.bottom)
-      .y1(d => y(d.tps))
+      .y1(d => y(d.sps))
       .curve(d3.curveMonotoneX);
 
     // Draw area
     svg.append('path')
-      .datum(this.tpsHistory)
+      .datum(this.spsHistory)
       .attr('fill', 'rgba(6, 255, 165, 0.3)')
       .attr('d', area);
 
     // Draw line
     svg.append('path')
-      .datum(this.tpsHistory)
+      .datum(this.spsHistory)
       .attr('fill', 'none')
       .attr('stroke', '#06ffa5')
       .attr('stroke-width', 2)
@@ -273,7 +330,44 @@ export class HUD {
       .attr('y', margin.top + 10)
       .attr('fill', '#06ffa5')
       .attr('font-size', '10px')
-      .text(maxTPS.toFixed(0));
+      .text(maxSPS.toFixed(0));
+  }
+
+  private renderBlockSPSChart(svg: d3.Selection<d3.BaseType, unknown, HTMLElement, any>) {
+    const width = 420;
+    const height = 110;
+    const margin = { top: 5, right: 40, bottom: 15, left: 5 };
+
+    const maxSwaps = d3.max(this.blockSwapsHistory, d => d.swaps) || 1;
+
+    const x = d3.scaleLinear()
+      .domain([0, this.blockSwapsHistory.length])
+      .range([margin.left, width - margin.right]);
+
+    const y = d3.scaleLinear()
+      .domain([0, maxSwaps])
+      .range([height - margin.bottom, margin.top]);
+
+    // Draw bars (flame chart style)
+    const barWidth = (width - margin.left - margin.right) / Math.max(this.blockSwapsHistory.length, 1);
+
+    this.blockSwapsHistory.forEach((d, i) => {
+      svg.append('rect')
+        .attr('x', x(i))
+        .attr('y', y(d.swaps))
+        .attr('width', Math.max(barWidth - 1, 1))
+        .attr('height', height - margin.bottom - y(d.swaps))
+        .attr('fill', '#06ffa5')
+        .attr('opacity', 0.7);
+    });
+
+    // Add max value label
+    svg.append('text')
+      .attr('x', width - margin.right + 5)
+      .attr('y', margin.top + 10)
+      .attr('fill', '#06ffa5')
+      .attr('font-size', '10px')
+      .text(maxSwaps.toFixed(0));
   }
 
   showNotification(message: string, duration = 3000) {
@@ -289,6 +383,52 @@ export class HUD {
     setTimeout(() => {
       notification.remove();
     }, duration);
+  }
+
+  addBlockLogEntry(slot: number, trades: number, volume: number) {
+    const container = document.getElementById('block-log');
+    if (!container) return;
+
+    const entry = document.createElement('div');
+    entry.className = 'block-log-entry';
+
+    const slotStr = slot.toString().padEnd(9);
+    const tradesStr = trades.toString().padStart(4);
+    const volumeStr = `$${this.formatNumber(volume)}`.padStart(10);
+
+    entry.textContent = `${slotStr} ${tradesStr} ${volumeStr}`;
+
+    // Add at the top
+    container.insertBefore(entry, container.firstChild);
+
+    // Keep only last 50 entries
+    while (container.children.length > 50) {
+      container.removeChild(container.lastChild!);
+    }
+
+    // Add to per-block chart history
+    this.blockVolumeHistory.push({ slot, volume });
+    this.blockSwapsHistory.push({ slot, swaps: trades });
+
+    // Keep last 60 blocks
+    if (this.blockVolumeHistory.length > 60) {
+      this.blockVolumeHistory.shift();
+    }
+    if (this.blockSwapsHistory.length > 60) {
+      this.blockSwapsHistory.shift();
+    }
+
+    // Update charts if in per-block mode
+    if (this.chartMode === 'perblock') {
+      this.updateVolumeChart();
+      this.updateSPSChart();
+    }
+  }
+
+  setChartMode(mode: 'persecond' | 'perblock') {
+    this.chartMode = mode;
+    this.updateVolumeChart();
+    this.updateSPSChart();
   }
 
   private formatNumber(num: number): string {

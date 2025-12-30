@@ -92,12 +92,14 @@
       left: 20px;
       top: 80px;
       width: 280px;
+      max-height: calc(100vh - 100px);
       background: rgba(0, 0, 0, 0.6);
       backdrop-filter: blur(10px);
       border: 1px solid rgba(139, 92, 246, 0.3);
       border-radius: 10px;
       padding: 20px;
       box-shadow: 0 0 30px rgba(139, 92, 246, 0.2);
+      overflow-y: auto;
     }
 
     .panel-title {
@@ -296,6 +298,68 @@
       background: rgba(139, 92, 246, 0.5);
       border-radius: 3px;
     }
+
+    /* Block Log */
+    .block-log-container {
+      margin-top: 20px;
+    }
+
+    .block-log-header {
+      font-family: 'Courier New', monospace;
+      font-size: 10px;
+      color: #8b5cf6;
+      padding: 4px 8px;
+      font-weight: bold;
+    }
+
+    .block-log {
+      font-family: 'Courier New', monospace;
+      font-size: 10px;
+      line-height: 1.4;
+      color: #06ffa5;
+      max-height: 300px;
+      overflow-y: auto;
+      background: rgba(0, 0, 0, 0.4);
+      padding: 8px;
+      border-radius: 4px;
+    }
+
+    .block-log-entry {
+      white-space: nowrap;
+      margin-bottom: 2px;
+      opacity: 0.8;
+    }
+
+    .block-log-entry:first-child {
+      opacity: 1;
+      color: #fff;
+    }
+
+    .block-log::-webkit-scrollbar {
+      width: 4px;
+    }
+
+    .block-log::-webkit-scrollbar-track {
+      background: rgba(139, 92, 246, 0.1);
+    }
+
+    .block-log::-webkit-scrollbar-thumb {
+      background: rgba(139, 92, 246, 0.5);
+      border-radius: 2px;
+    }
+
+    .left-panel::-webkit-scrollbar {
+      width: 6px;
+    }
+
+    .left-panel::-webkit-scrollbar-track {
+      background: rgba(139, 92, 246, 0.1);
+    }
+
+    .left-panel::-webkit-scrollbar-thumb {
+      background: rgba(139, 92, 246, 0.5);
+      border-radius: 3px;
+    }
   </style>
 </head>
 <body>
@@ -311,8 +375,8 @@
           <div class="stat-value" id="current-slot">-</div>
         </div>
         <div class="stat">
-          <div class="stat-label">TPS</div>
-          <div class="stat-value" id="tps">0</div>
+          <div class="stat-label">SPS</div>
+          <div class="stat-value" id="sps">0</div>
         </div>
         <div class="stat">
           <div class="stat-label">Mode</div>
@@ -346,16 +410,23 @@
           <div class="progress-fill" id="progress-fill" style="width: 0%"></div>
         </div>
       </div>
+
+      <!-- Block Log -->
+      <div class="block-log-container">
+        <div class="panel-title" style="margin-top: 20px; margin-bottom: 10px;">Block Log</div>
+        <div class="block-log-header">Slot      Trades      $Vol</div>
+        <div id="block-log" class="block-log"></div>
+      </div>
     </div>
 
     <!-- Right Panel -->
     <div class="right-panel">
       <div class="leaderboard">
-        <div class="panel-title" id="programs-title">Top Programs (60s window)</div>
+        <div class="panel-title" id="programs-title">Top Programs (last block)</div>
         <div id="programs-leaderboard"></div>
       </div>
       <div class="leaderboard">
-        <div class="panel-title" id="tokens-title">Top Tokens (60s window)</div>
+        <div class="panel-title" id="tokens-title">Top Tokens (last block)</div>
         <div id="tokens-leaderboard"></div>
       </div>
     </div>
@@ -367,8 +438,8 @@
         <svg id="volume-chart" width="100%" height="100%"></svg>
       </div>
       <div class="chart-container">
-        <div class="chart-title">Trades Per Second</div>
-        <svg id="tps-chart" width="100%" height="100%"></svg>
+        <div class="chart-title">Swaps Per Second</div>
+        <svg id="sps-chart" width="100%" height="100%"></svg>
       </div>
     </div>
 
@@ -379,7 +450,7 @@
     <div class="controls">
       <div><kbd>1-5</kbd> Particle Shape</div>
       <div><kbd>F</kbd> Free Mode <kbd>P</kbd> Program <kbd>T</kbd> Token <kbd>V</kbd> Volume</div>
-      <div><kbd>+/-</kbd> Particle Size <kbd>L</kbd> Leaderboard Mode</div>
+      <div><kbd>+/-</kbd> Particle Size <kbd>L</kbd> Leaderboard <kbd>C</kbd> Chart Mode</div>
     </div>
   </div>
 

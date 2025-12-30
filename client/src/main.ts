@@ -20,7 +20,8 @@ let currentShape: ParticleShape = 'cube';
 let tradesThisSecond = 0;
 let volumeThisSecond = 0;
 let lastTpsUpdate = Date.now();
-let leaderboardMode: 'window' | 'block' = 'window'; // Toggle between 60s window and last block
+let leaderboardMode: 'window' | 'block' = 'block'; // Toggle between 60s window and last block
+let chartMode: 'persecond' | 'perblock' = 'persecond'; // Toggle between per-second and per-block charts
 
 // Handle worker messages
 worker.onmessage = (event) => {
@@ -65,10 +66,10 @@ function handleWSMessage(message: WSMessage) {
     hud.updateCurrentSlot(currentSlot);
     hud.updateBlockProgress(batch.blockProgress);
 
-    // Update TPS and charts every second
+    // Update SPS and charts every second
     const now = Date.now();
     if (now - lastTpsUpdate > 1000) {
-      hud.updateTPS(tradesThisSecond);
+      hud.updateSPS(tradesThisSecond);
 
       // Add per-second data point to charts
       hud.addChartDataPoint(tradesThisSecond, volumeThisSecond);
@@ -83,10 +84,8 @@ function handleWSMessage(message: WSMessage) {
     const block = message as BlockCompleteMessage;
     console.log(`✅ Block ${block.slot} complete: ${block.trades} trades, $${block.volume.toFixed(2)}`);
 
-    hud.showNotification(
-      `Block ${block.slot} | ${block.trades} trades | $${formatNumber(block.volume)}`,
-      2000
-    );
+    // Add to block log instead of showing notification
+    hud.addBlockLogEntry(block.slot, block.trades, block.volume);
   }
 
   if (message.type === 'stats') {
@@ -215,6 +214,14 @@ document.addEventListener('keydown', (e) => {
     hud.showNotification(`Leaderboards: ${mode}`, 2000);
     updateLeaderboards();
   }
+
+  // Chart mode toggle
+  if (e.key.toLowerCase() === 'c') {
+    chartMode = chartMode === 'persecond' ? 'perblock' : 'persecond';
+    const mode = chartMode === 'persecond' ? 'Per Second' : 'Per Block';
+    hud.showNotification(`Charts: ${mode}`, 2000);
+    hud.setChartMode(chartMode);
+  }
 });
 
 // Utility
@@ -235,3 +242,4 @@ console.log('  1-5: Change particle shape');
 console.log('  F: Free mode | P: Program mode | T: Token mode | V: Volume mode');
 console.log('  +/-: Adjust particle size');
 console.log('  L: Toggle leaderboards (60s window / last block)');
+console.log('  C: Toggle charts (per second / per block)');
