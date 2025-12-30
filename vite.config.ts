@@ -1,8 +1,10 @@
 import { defineConfig } from 'vite';
+import glsl from 'vite-plugin-glsl';
 
 export default defineConfig({
   root: 'client',
   publicDir: 'public',
+  plugins: [glsl()],
   server: {
     port: 3000,
     proxy: {

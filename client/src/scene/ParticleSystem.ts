@@ -1,22 +1,25 @@
 import * as THREE from 'three';
 import type { TradeMessage } from '../../../shared/types';
-import type { Particle, ParticleShape, FocusMode } from '../types';
+import type { Particle, FocusMode } from '../types';
+import vertexShader from './shaders/particle.vert';
+import fragmentShader from './shaders/particle.frag';
 
 export class ParticleSystem {
   private scene: THREE.Scene;
   private particles: Map<string, Particle> = new Map();
-  private particlePool: Particle[] = [];
 
-  // Instanced meshes for each geometry type
-  private instancedMeshes: Map<ParticleShape, THREE.InstancedMesh> = new Map();
-  private geometries: Map<ParticleShape, THREE.BufferGeometry> = new Map();
-  private material: THREE.MeshStandardMaterial;
+  private points!: THREE.Points;
+  private geometry!: THREE.BufferGeometry;
+  private material!: THREE.ShaderMaterial;
 
-  // Instance tracking
-  private instanceCounts: Map<ParticleShape, number> = new Map();
-  private maxInstances = 10000; // Increased for high-throughput scenarios
+  private positions!: Float32Array;
+  private colors!: Float32Array;
+  private sizes!: Float32Array;
 
-  private currentShape: ParticleShape = 'cube';
+  private maxParticles = 10000;
+  private particleCount = 0;
+  private particleIndex = 0;
+
   private focusMode: FocusMode = 'program'; // Default to program for more color variety
   private sizeMultiplier = 1.0;
 
@@ -40,74 +43,43 @@ export class ParticleSystem {
   ]);
 
   constructor(scene: THREE.Scene) {
+    console.log('Initializing ParticleSystem...');
     this.scene = scene;
 
-    this.createGeometries();
-    this.createMaterial();
-    this.createInstancedMeshes();
+    this.init();
   }
 
-  private createGeometries() {
-    this.geometries.set('cube', new THREE.BoxGeometry(1, 1, 1));
-    this.geometries.set('octahedron', new THREE.OctahedronGeometry(0.7));
-    this.geometries.set('tetrahedron', new THREE.TetrahedronGeometry(0.8));
-    this.geometries.set('sphere', new THREE.SphereGeometry(0.6, 16, 16));
-    this.geometries.set('torus', new THREE.TorusGeometry(0.5, 0.2, 8, 16));
-  }
+  private init() {
+    console.log('ParticleSystem init...');
+    this.geometry = new THREE.BufferGeometry();
 
-  private createMaterial() {
-    // Use MeshBasicMaterial for pure colors without lighting interference
-    this.material = new THREE.MeshBasicMaterial({
-      color: 0xffffff,    // White base - vertex colors will multiply with this
-      vertexColors: true, // Per-instance colors
-      toneMapped: false,  // Prevent color washing
-    }) as any; // Cast to MeshStandardMaterial type for compatibility
+    this.positions = new Float32Array(this.maxParticles * 3);
+    this.colors = new Float32Array(this.maxParticles * 3);
+    this.sizes = new Float32Array(this.maxParticles);
 
-    console.log('🎨 Material created:', this.material.type, 'vertexColors:', (this.material as any).vertexColors, 'color:', (this.material as any).color.getHexString());
-  }
+    this.geometry.setAttribute('position', new THREE.BufferAttribute(this.positions, 3));
+    this.geometry.setAttribute('color', new THREE.BufferAttribute(this.colors, 3));
+    this.geometry.setAttribute('size', new THREE.BufferAttribute(this.sizes, 1));
 
-  private createInstancedMeshes() {
-    for (const [shape, geometry] of this.geometries) {
-      const mesh = new THREE.InstancedMesh(
-        geometry,
-        this.material,
-        this.maxInstances
-      );
-      mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    this.material = new THREE.ShaderMaterial({
+      vertexShader,
+      fragmentShader,
+      blending: THREE.AdditiveBlending,
+      depthTest: false,
+      transparent: true,
+      // vertexColors removed - we handle colors manually in shader
+    });
 
-      // CRITICAL: Initialize instance colors buffer
-      // Without this, setColorAt() calls are ignored!
-      const colors = new Float32Array(this.maxInstances * 3);
-      // Initialize all to white
-      for (let i = 0; i < this.maxInstances; i++) {
-        colors[i * 3] = 1.0;     // R
-        colors[i * 3 + 1] = 1.0; // G
-        colors[i * 3 + 2] = 1.0; // B
-      }
-      mesh.instanceColor = new THREE.InstancedBufferAttribute(colors, 3);
-      mesh.instanceColor.setUsage(THREE.DynamicDrawUsage);
+    console.log('🎨 ShaderMaterial created, vertex shader length:', vertexShader.length, 'fragment shader length:', fragmentShader.length);
 
-      mesh.count = 0; // Start with no instances
-      this.scene.add(mesh);
-      this.instancedMeshes.set(shape, mesh);
-      this.instanceCounts.set(shape, 0);
+    this.points = new THREE.Points(this.geometry, this.material);
+    this.scene.add(this.points);
 
-      console.log(`🎨 Created ${shape} mesh with instanceColor buffer:`, mesh.instanceColor !== null);
-    }
-  }
-
-  setShape(shape: ParticleShape) {
-    this.currentShape = shape;
-
-    // Show only current shape
-    for (const [shapeKey, mesh] of this.instancedMeshes) {
-      mesh.visible = shapeKey === shape;
-    }
+    console.log('🔵 Points object created and added to scene. Geometry has', this.maxParticles, 'max particles');
   }
 
   setFocusMode(mode: FocusMode) {
     this.focusMode = mode;
-    // Recompute all particle colors and sizes
     this.updateAllParticles();
   }
 
@@ -117,101 +89,127 @@ export class ParticleSystem {
   }
 
   addTrade(trade: TradeMessage, slot: number) {
-    // CONTAINER APPROACH: Spawn particles ABOVE block, they "rain down" and settle inside
-    // Block is at (0, 0, 0) with size 30 units (fixed size)
-    // Spawn in a cone/funnel above it
+    const blockSize = 30;
+    const spawnHeight = 25 + Math.random() * 10;
+    const spreadX = (Math.random() - 0.5) * blockSize * 1.0;
+    const spreadZ = (Math.random() - 0.5) * blockSize * 1.0;
 
-    const blockSize = 30; // Block size (must match BlockBuilder)
-    const spawnHeight = 25 + Math.random() * 10; // 25-35 units above center
-
-    // Random position within block's X/Z footprint - FULL spread to fill entire volume
-    const spreadX = (Math.random() - 0.5) * blockSize * 1.0; // Full width
-    const spreadZ = (Math.random() - 0.5) * blockSize * 1.0; // Full depth
-
-    const position = new THREE.Vector3(
-      spreadX,
-      spawnHeight,
-      spreadZ
-    );
-
-    // Velocity: primarily downward (gravity-like), minimal drift to preserve spread
+    const position = new THREE.Vector3(spreadX, spawnHeight, spreadZ);
     const speed = this.calculateSpeed(trade.vu);
-    const velocity = new THREE.Vector3(
-      -spreadX * 0.01, // Very slight drift toward center X - keep spread!
-      -speed,          // Downward (rain down)
-      -spreadZ * 0.01  // Very slight drift toward center Z - keep spread!
-    );
-
-    // Calculate size
+    const velocity = new THREE.Vector3(-spreadX * 0.01, -speed, -spreadZ * 0.01);
     const size = this.calculateSize(trade.vu);
+    const color = new THREE.Color(this.calculateColor(trade));
 
-    // Calculate color
-    const color = this.calculateColor(trade);
-
-    // Create NEW particle (no recycling!)
-    const particle: Particle = this.createNewParticle(slot);
-    particle.id = trade.sig;
-    particle.slot = slot;
-    particle.position.copy(position);
-    particle.velocity.copy(velocity);
-    particle.size = size;
-    particle.color.set(color);
-    particle.rotation.set(0, 0, 0);
-    particle.rotationSpeed.set(0, 0, 0);
-    particle.lifetime = 0;
-    particle.maxLifetime = 500; // 500ms - orphan cleanup
-    particle.trade = trade;
-    particle.locked = false;
-    particle.lockedPosition.set(0, 0, 0);
-
-    this.particles.set(particle.id, particle);
-  }
-
-  private createNewParticle(slot: number): Particle {
-    const mesh = this.instancedMeshes.get(this.currentShape)!;
-    let instanceId = this.instanceCounts.get(this.currentShape)!;
-
-    if (instanceId >= this.maxInstances) {
-      // We've hit the instance limit - increase it or warn
-      console.warn(`⚠️ Hit max instances (${this.maxInstances}), particle may not render`);
-      instanceId = this.maxInstances - 1;
-    }
-
-    // Create new particle instance
     const particle: Particle = {
-      id: '',
+      id: trade.sig,
       slot,
-      mesh,
-      instanceId,
-      position: new THREE.Vector3(),
-      velocity: new THREE.Vector3(),
-      size: 1,
-      color: new THREE.Color(),
-      rotation: new THREE.Euler(),
-      rotationSpeed: new THREE.Vector3(),
+      position,
+      velocity,
+      size,
+      color,
       lifetime: 0,
-      maxLifetime: 10000,
-      trade: {} as TradeMessage,
+      maxLifetime: 500,
+      trade,
       locked: false,
       lockedPosition: new THREE.Vector3(),
+      index: this.particleIndex,
     };
 
-    this.instanceCounts.set(this.currentShape, instanceId + 1);
-    mesh.count = Math.min(instanceId + 1, this.maxInstances);
+    this.particles.set(particle.id, particle);
 
-    return particle;
+    this.positions[this.particleIndex * 3] = position.x;
+    this.positions[this.particleIndex * 3 + 1] = position.y;
+    this.positions[this.particleIndex * 3 + 2] = position.z;
+
+    this.colors[this.particleIndex * 3] = color.r;
+    this.colors[this.particleIndex * 3 + 1] = color.g;
+    this.colors[this.particleIndex * 3 + 2] = color.b;
+
+    this.sizes[this.particleIndex] = size;
+
+    // Removed frequent logging - enable for debugging
+    // if (Math.random() < 0.001) {
+    //   console.log(`✨ Added particle ${this.particleIndex}: pos(${position.x.toFixed(1)}, ${position.y.toFixed(1)}, ${position.z.toFixed(1)}), size ${size.toFixed(1)}, color(${color.r.toFixed(2)}, ${color.g.toFixed(2)}, ${color.b.toFixed(2)}), count: ${this.particleCount}`);
+    // }
+
+    this.particleIndex = (this.particleIndex + 1) % this.maxParticles;
+    if (this.particleCount < this.maxParticles) {
+      this.particleCount++;
+    }
+  }
+
+  update(deltaTime: number, blockBuilder: any) {
+    for (const particle of this.particles.values()) {
+      if (!particle.locked) {
+        particle.lifetime += deltaTime;
+
+        if (particle.lifetime > particle.maxLifetime) {
+          this.particles.delete(particle.id);
+          continue;
+        }
+
+        particle.position.add(particle.velocity.clone().multiplyScalar(deltaTime * 0.05));
+
+        const blockHalfSize = 15;
+        const isInsideXZ = Math.abs(particle.position.x) < blockHalfSize && Math.abs(particle.position.z) < blockHalfSize;
+
+        if (isInsideXZ) {
+          const cellSize = 4.0;
+          const stackHeight = blockBuilder.getStackHeightAt(particle.slot, particle.position.x, particle.position.z, cellSize);
+          const landingHeight = stackHeight + cellSize;
+
+          if (particle.position.y <= landingHeight) {
+            particle.position.y = landingHeight;
+            const lockResult = blockBuilder.lockParticle(particle.id, particle.slot, particle.position);
+            if (lockResult.locked && lockResult.gridPosition) {
+              particle.locked = true;
+              particle.lockedPosition.copy(lockResult.gridPosition);
+              particle.velocity.set(0, 0, 0);
+            }
+          }
+        }
+
+        if (particle.position.y < -blockHalfSize) {
+          particle.position.y = -blockHalfSize;
+          particle.velocity.y = 0;
+        }
+      } else {
+        const blockPosition = blockBuilder.getBlockPosition(particle.slot);
+        if (blockPosition) {
+          particle.position.copy(blockPosition).add(particle.lockedPosition);
+        }
+      }
+
+      const index = particle.index;
+      this.positions[index * 3] = particle.position.x;
+      this.positions[index * 3 + 1] = particle.position.y;
+      this.positions[index * 3 + 2] = particle.position.z;
+
+      this.colors[index * 3] = particle.color.r;
+      this.colors[index * 3 + 1] = particle.color.g;
+      this.colors[index * 3 + 2] = particle.color.b;
+
+      this.sizes[index] = particle.size;
+    }
+
+    this.geometry.attributes.position.needsUpdate = true;
+    this.geometry.attributes.color.needsUpdate = true;
+    this.geometry.attributes.size.needsUpdate = true;
+    this.geometry.setDrawRange(0, this.particleCount);
+
+    // Removed frequent logging - enable for debugging
+    // if (Math.random() < 0.001) {
+    //   console.log(`🔵 Points update: ${this.particles.size} particles in map, draw range: 0-${this.particleCount}, points visible: ${this.points.visible}`);
+    // }
   }
 
   private calculateSpeed(volumeUsd: number): number {
-    // CONTAINER APPROACH: Fall speed (downward velocity)
-    // Bigger trades fall faster (like heavier objects)
     return 2.0 + Math.log10(Math.max(1, volumeUsd)) * 0.3;
   }
 
   private calculateSize(volumeUsd: number): number {
-    // ALWAYS proportional to trade volume - LARGER for visibility
     const baseSize = 0.8 + Math.log10(Math.max(1, volumeUsd)) * 0.8;
-    return Math.min(baseSize * this.sizeMultiplier, 12); // Cap at 12 units
+    return Math.min(baseSize * this.sizeMultiplier, 12);
   }
 
   private calculateColor(trade: TradeMessage): number {
@@ -220,38 +218,20 @@ export class ParticleSystem {
     switch (this.focusMode) {
       case 'program':
         color = this.programColors.get(trade.p) || 0xffffff;
-        if (Math.random() < 0.01) {
-          console.log(`🎨 PROGRAM mode: ${trade.p} → 0x${color.toString(16)}`);
-        }
         return color;
-
       case 'token':
         color = this.tokenColors.get(trade.ta) || this.hashColor(trade.ta);
-        if (Math.random() < 0.01) {
-          console.log(`🎨 TOKEN mode: ${trade.ta} → 0x${color.toString(16)}`);
-        }
         return color;
-
       case 'volume':
-        // Heat map: blue -> cyan -> purple -> pink -> red
-        // Adjusted thresholds for better distribution
-        if (trade.vu < 10) color = 0x00ffff;       // Cyan (micro trades)
-        else if (trade.vu < 50) color = 0x0099ff;  // Blue
-        else if (trade.vu < 200) color = 0x8b5cf6; // Purple
-        else if (trade.vu < 1000) color = 0xff1493; // Deep Pink
-        else if (trade.vu < 5000) color = 0xff006e; // Hot Pink
-        else color = 0xff3333;                      // Red (whales)
-
-        if (Math.random() < 0.01) {
-          console.log(`🎨 VOLUME mode: $${trade.vu.toFixed(2)} → 0x${color.toString(16)}`);
-        }
+        if (trade.vu < 10) color = 0x00ffff;
+        else if (trade.vu < 50) color = 0x0099ff;
+        else if (trade.vu < 200) color = 0x8b5cf6;
+        else if (trade.vu < 1000) color = 0xff1493;
+        else if (trade.vu < 5000) color = 0xff006e;
+        else color = 0xff3333;
         return color;
-
       case 'free':
       default:
-        if (Math.random() < 0.01) {
-          console.log(`🎨 FREE mode: white (0xffffff)`);
-        }
         return 0xffffff;
     }
   }
@@ -261,8 +241,7 @@ export class ParticleSystem {
     for (let i = 0; i < str.length; i++) {
       hash = str.charCodeAt(i) + ((hash << 5) - hash);
     }
-    // Convert to vibrant color
-    return (hash & 0x00FFFFFF) | 0x404040; // Ensure minimum brightness
+    return (hash & 0x00FFFFFF) | 0x404040;
   }
 
   private updateAllParticles() {
@@ -272,126 +251,6 @@ export class ParticleSystem {
     }
   }
 
-  update(deltaTime: number, blockBuilder: any) {
-    const matrix = new THREE.Matrix4();
-    const color = new THREE.Color();
-
-    for (const particle of this.particles.values()) {
-      // Update lifetime (only for unlocked particles - locked ones are safe)
-      if (!particle.locked) {
-        particle.lifetime += deltaTime;
-
-        // Orphan cleanup: Remove unlocked particles after 500ms
-        if (particle.lifetime > particle.maxLifetime) {
-          if (Math.random() < 0.05) console.log(`♻️ Removing orphan particle ${particle.id.slice(0,6)} from slot ${particle.slot} (500ms timeout)`);
-          this.particles.delete(particle.id);
-          continue;
-        }
-      }
-
-      // Safety: Remove particles that fell way below the floor
-      if (particle.position.y < -50) {
-        if (Math.random() < 0.01) console.log(`🗑️ Removing fallen particle from slot ${particle.slot}`);
-        this.particles.delete(particle.id);
-        continue;
-      }
-
-      if (!particle.locked) {
-        // Check if this particle's block is sweeping - if so, FORCE LOCK immediately
-        if (blockBuilder.isBlockSweeping(particle.slot)) {
-          const forceLockResult = blockBuilder.forceLockParticle(particle.id, particle.slot, particle.position);
-          if (forceLockResult.locked && forceLockResult.gridPosition) {
-            particle.locked = true;
-            particle.lockedPosition.copy(forceLockResult.gridPosition);
-            particle.velocity.set(0, 0, 0);
-            if (Math.random() < 0.05) {
-              console.log(`⚡ Force-locked particle ${particle.id.slice(0,6)} to sweeping block ${particle.slot}`);
-            }
-          }
-        } else {
-          // CONTAINER APPROACH: Particles rain down, maintaining their downward velocity
-          // They DON'T recalculate toward center - they fall straight down
-
-          // Update position - particles fall with their initial velocity
-          particle.position.add(
-            particle.velocity.clone().multiplyScalar(deltaTime * 0.05) // Slower fall for visibility
-          );
-
-          // PHYSICS-STYLE STACKING: Check if particle should land on other particles
-          const blockHalfSize = 15;
-          const isInsideXZ = Math.abs(particle.position.x) < blockHalfSize &&
-                             Math.abs(particle.position.z) < blockHalfSize;
-
-          if (isInsideXZ) {
-            // Get height of stack at this X/Z position
-            const cellSize = 4.0;
-            const stackHeight = blockBuilder.getStackHeightAt(particle.slot, particle.position.x, particle.position.z, cellSize);
-            const landingHeight = stackHeight + cellSize; // Land on top of stack
-
-            // Check if particle has reached landing height
-            if (particle.position.y <= landingHeight) {
-              // Particle should lock here - either on floor or on top of other particles
-              particle.position.y = landingHeight; // Snap to landing height
-
-              const lockResult = blockBuilder.lockParticle(particle.id, particle.slot, particle.position);
-              if (lockResult.locked && lockResult.gridPosition) {
-                particle.locked = true;
-                particle.lockedPosition.copy(lockResult.gridPosition);
-                particle.velocity.set(0, 0, 0);
-              }
-            }
-          }
-
-          // Stop particles from falling through the bottom
-          if (particle.position.y < -blockHalfSize) {
-            particle.position.y = -blockHalfSize;
-            particle.velocity.y = 0;
-          }
-        }
-      } else {
-        // Locked particles move WITH their block
-        const blockPosition = blockBuilder.getBlockPosition(particle.slot);
-        if (blockPosition) {
-          // Particle world position = block position + relative offset
-          particle.position.copy(blockPosition).add(particle.lockedPosition);
-        }
-      }
-
-      // No rotation - keep particles stable
-
-      // Fade out near end of life (only for unlocked particles)
-      const lifeFactor = particle.locked ? 1.0 : (1.0 - (particle.lifetime / particle.maxLifetime));
-
-      // Update instance matrix
-      matrix.makeRotationFromEuler(particle.rotation);
-      matrix.scale(new THREE.Vector3(
-        particle.size * lifeFactor,
-        particle.size * lifeFactor,
-        particle.size * lifeFactor
-      ));
-      matrix.setPosition(particle.position);
-
-      particle.mesh.setMatrixAt(particle.instanceId, matrix);
-
-      // Set color - pure vibrant colors (no multiplier needed with MeshBasicMaterial)
-      particle.mesh.setColorAt(particle.instanceId, particle.color);
-
-      // Debug: log color setting occasionally
-      if (Math.random() < 0.001) {
-        console.log(`🎨 Setting color on instance ${particle.instanceId}:`, particle.color.getHexString(), 'focus:', this.focusMode);
-      }
-    }
-
-    // Update all meshes
-    for (const mesh of this.instancedMeshes.values()) {
-      mesh.instanceMatrix.needsUpdate = true;
-      if (mesh.instanceColor) {
-        mesh.instanceColor.needsUpdate = true;
-      }
-    }
-  }
-
-  // Remove ALL particles belonging to a specific slot
   removeParticlesForSlot(slot: number) {
     const toRemove: string[] = [];
     for (const [id, particle] of this.particles) {
@@ -399,31 +258,9 @@ export class ParticleSystem {
         toRemove.push(id);
       }
     }
-
-    console.log(`🗑️ Removing ${toRemove.length} particles for slot ${slot}`);
     for (const id of toRemove) {
       this.particles.delete(id);
     }
-  }
-
-  // Debug: Get particle stats by slot
-  getStats() {
-    let locked = 0;
-    let unlocked = 0;
-    const bySlot = new Map<number, number>();
-
-    for (const p of this.particles.values()) {
-      if (p.locked) locked++;
-      else unlocked++;
-      bySlot.set(p.slot, (bySlot.get(p.slot) || 0) + 1);
-    }
-
-    return {
-      total: this.particles.size,
-      locked,
-      unlocked,
-      slots: Array.from(bySlot.entries()).slice(0, 5) // Show top 5 slots
-    };
   }
 
   getParticlesForBlock(): Particle[] {
@@ -432,5 +269,7 @@ export class ParticleSystem {
 
   clear() {
     this.particles.clear();
+    this.particleCount = 0;
+    this.particleIndex = 0;
   }
 }

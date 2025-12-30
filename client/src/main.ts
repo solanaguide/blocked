@@ -97,31 +97,31 @@ function handleWSMessage(message: WSMessage) {
 // Hotkey controls
 document.addEventListener('keydown', (e) => {
   // Particle shapes (1-5)
-  if (e.key === '1') {
-    currentShape = 'cube';
-    scene.setParticleShape(currentShape);
-    hud.showNotification('Shape: Cube', 1000);
-  }
-  if (e.key === '2') {
-    currentShape = 'octahedron';
-    scene.setParticleShape(currentShape);
-    hud.showNotification('Shape: Octahedron', 1000);
-  }
-  if (e.key === '3') {
-    currentShape = 'tetrahedron';
-    scene.setParticleShape(currentShape);
-    hud.showNotification('Shape: Tetrahedron', 1000);
-  }
-  if (e.key === '4') {
-    currentShape = 'sphere';
-    scene.setParticleShape(currentShape);
-    hud.showNotification('Shape: Sphere', 1000);
-  }
-  if (e.key === '5') {
-    currentShape = 'torus';
-    scene.setParticleShape(currentShape);
-    hud.showNotification('Shape: Torus', 1000);
-  }
+  // if (e.key === '1') {
+  //   currentShape = 'cube';
+  //   // scene.setParticleShape(currentShape);
+  //   hud.showNotification('Shape: Cube', 1000);
+  // }
+  // if (e.key === '2') {
+  //   currentShape = 'octahedron';
+  //   // scene.setParticleShape(currentShape);
+  //   hud.showNotification('Shape: Octahedron', 1000);
+  // }
+  // if (e.key === '3') {
+  //   currentShape = 'tetrahedron';
+  //   // scene.setParticleShape(currentShape);
+  //   hud.showNotification('Shape: Tetrahedron', 1000);
+  // }
+  // if (e.key === '4') {
+  //   currentShape = 'sphere';
+  //   // scene.setParticleShape(currentShape);
+  //   hud.showNotification('Shape: Sphere', 1000);
+  // }
+  // if (e.key === '5') {
+  //   currentShape = 'torus';
+  //   // scene.setParticleShape(currentShape);
+  //   hud.showNotification('Shape: Torus', 1000);
+  // }
 
   // Focus modes
   if (e.key.toLowerCase() === 'f') {
@@ -169,7 +169,7 @@ function formatNumber(num: number): string {
 }
 
 // Set initial mode
-scene.setParticleShape('cube');
+// scene.setParticleShape('cube');
 scene.setFocusMode('volume');
 
 console.log('🚀 Solana Block Visualizer initialized');

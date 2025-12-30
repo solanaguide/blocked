@@ -20,6 +20,7 @@ export class Scene {
   private blockStartTime: number = Date.now();
 
   constructor(container: HTMLElement) {
+    console.log('Initializing Scene...');
     // Create scene
     this.scene = new THREE.Scene();
 
@@ -40,8 +41,7 @@ export class Scene {
     });
     this.renderer.setSize(window.innerWidth, window.innerHeight);
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-    this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    this.renderer.toneMappingExposure = 1.2;
+    this.renderer.toneMapping = THREE.NoToneMapping;
     container.appendChild(this.renderer.domElement);
 
     // Create subsystems
@@ -92,11 +92,11 @@ export class Scene {
     }
 
     // Debug logging every 3 seconds
-    if (Math.floor(time / 3000) !== Math.floor(this.lastTime / 3000)) {
-      const stats = this.particleSystem.getStats();
-      const slotInfo = stats.slots.map(([slot, count]) => `${slot}:${count}`).join(', ');
-      console.log(`📊 Particles: ${stats.total} total (${stats.locked} locked, ${stats.unlocked} unlocked) | Slots: ${slotInfo}`);
-    }
+    // if (Math.floor(time / 3000) !== Math.floor(this.lastTime / 3000)) {
+    //   const stats = this.particleSystem.getStats();
+    //   const slotInfo = stats.slots.map(([slot, count]) => `${slot}:${count}`).join(', ');
+    //   console.log(`📊 Particles: ${stats.total} total (${stats.locked} locked, ${stats.unlocked} unlocked) | Slots: ${slotInfo}`);
+    // }
 
     // Render
     this.renderer.render(this.scene, this.camera);
@@ -152,9 +152,9 @@ export class Scene {
     this.blockStartTime = Date.now();
   }
 
-  setParticleShape(shape: ParticleShape) {
-    this.particleSystem.setShape(shape);
-  }
+  // setParticleShape(shape: ParticleShape) {
+  //   this.particleSystem.setShape(shape);
+  // }
 
   setFocusMode(mode: FocusMode) {
     this.particleSystem.setFocusMode(mode);
