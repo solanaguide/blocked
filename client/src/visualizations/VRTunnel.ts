@@ -5,8 +5,15 @@ import type { TradeMessage } from '../../../shared/types';
 import type { BlockData } from '../types';
 
 /**
- * VRTunnel - Flying through a neon Tron-style tunnel
- * Each ring = a block, colored by volume/activity
+ * VRTunnel - Flying through an infinite neon tunnel (Tron aesthetic)
+ *
+ * CONCEPT: Endless tunnel where you fly forward through time.
+ * - Each RING = a completed block
+ * - Ring COLOR = block volume (blue=low → purple → pink → red=high)
+ * - Ring THICKNESS = number of trades in that block
+ * - Tunnel SPEED = current trade activity (more trades = faster flight)
+ * - Block change = WHOOSH effect (speed burst + camera shake)
+ * - Rings continuously spawn ahead and pass you by
  */
 export class VRTunnel extends BaseVisualization {
   private rings: TunnelRing[] = [];
@@ -23,9 +30,9 @@ export class VRTunnel extends BaseVisualization {
     this.camera.position.set(0, 0, 10);
     this.camera.lookAt(0, 0, -100);
 
-    // Initial tunnel rings
-    for (let i = 0; i < 30; i++) {
-      this.createRing(-i * 10, 0xff006e, 1);
+    // Initial tunnel rings - start with placeholder rings
+    for (let i = 0; i < 40; i++) {
+      this.createRing(-i * 10, 0x8b5cf6, 1);
     }
 
     // Add some ambient light
@@ -162,7 +169,7 @@ export class VRTunnel extends BaseVisualization {
       ring.mesh.rotation.z += deltaTime * 0.0005;
       ring.edgeMesh.rotation.z += deltaTime * 0.0005;
 
-      // Remove rings that passed the camera
+      // Remove rings that passed the camera AND create new ones ahead
       if (ring.mesh.position.z > 20) {
         this.scene.remove(ring.mesh);
         this.scene.remove(ring.edgeMesh);
@@ -171,6 +178,10 @@ export class VRTunnel extends BaseVisualization {
         ring.edgeMesh.geometry.dispose();
         (ring.edgeMesh.material as THREE.Material).dispose();
         this.rings.splice(index, 1);
+
+        // Create new ring far ahead to maintain infinite tunnel
+        const furthestZ = Math.min(...this.rings.map(r => r.mesh.position.z));
+        this.createRing(furthestZ - 10, 0x8b5cf6, 1);
       }
     });
 

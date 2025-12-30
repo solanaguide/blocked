@@ -100,7 +100,7 @@ export class HeatmapGrid extends BaseVisualization {
 
   onTrade(trade: TradeMessage, slot: number): void {
     const program = trade.p;
-    const token = trade.ti || 'UNKNOWN';
+    const token = trade.ta || 'UNKNOWN'; // Use token_a as primary token
     const key = `${program}-${token}`;
 
     if (!this.cells.has(key)) {

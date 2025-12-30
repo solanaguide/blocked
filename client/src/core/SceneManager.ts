@@ -94,7 +94,7 @@ export class SceneManager {
     // Create and initialize new scene
     const factory = this.scenes.get(name)!;
     this.activeScene = factory();
-    this.activeScene.init(this.container);
+    this.activeScene.init(this.container, this.dataProcessor);
 
     this.activeSceneName = name;
 
@@ -119,6 +119,13 @@ export class SceneManager {
    */
   getActiveSceneName(): string | null {
     return this.activeSceneName;
+  }
+
+  /**
+   * Get the DataProcessor instance
+   */
+  getDataProcessor(): DataProcessor {
+    return this.dataProcessor;
   }
 
   /**

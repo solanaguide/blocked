@@ -1,5 +1,6 @@
 import type { TradeMessage } from '../../../shared/types';
 import type { BlockData, FocusMode, ParticleShape } from '../types';
+import type { DataProcessor } from '../data/DataProcessor';
 
 /**
  * HUD configuration interface
@@ -23,9 +24,9 @@ export interface IHUDConfig {
  */
 export interface IVisualization {
   /**
-   * Initialize the visualization with a container element
+   * Initialize the visualization with a container element and data processor
    */
-  init(container: HTMLElement): void;
+  init(container: HTMLElement, dataProcessor: DataProcessor): void;
 
   /**
    * Clean up and dispose of all resources

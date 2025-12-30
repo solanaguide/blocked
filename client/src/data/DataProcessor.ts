@@ -7,6 +7,7 @@ import type { BlockData } from '../types';
  * - Grace period management
  * - Trade buffering
  * - Block completion detection
+ * - Top programs and tokens tracking
  *
  * This allows visualizations to focus purely on rendering without
  * worrying about data timing and state management.
@@ -18,6 +19,11 @@ export class DataProcessor {
   private inGracePeriod: boolean = false;
   private pendingSlot: number = 0;
   private tradeBuffer: TradeMessage[] = [];
+
+  // Top programs/tokens tracking (available immediately for visualizations)
+  private programVolumes: Map<string, number> = new Map();
+  private tokenVolumes: Map<string, number> = new Map();
+  private maxTracked: number = 25; // Track top 25 of each
 
   // Callbacks for visualization
   private onTradeCallback?: (trade: TradeMessage, slot: number) => void;
@@ -55,6 +61,16 @@ export class DataProcessor {
    */
   processTrade(trade: TradeMessage) {
     const now = Date.now();
+
+    // Track program and token volumes
+    this.programVolumes.set(trade.p, (this.programVolumes.get(trade.p) || 0) + trade.vu);
+    // Track both token_a and token_b volumes
+    if (trade.ta) {
+      this.tokenVolumes.set(trade.ta, (this.tokenVolumes.get(trade.ta) || 0) + trade.vu / 2);
+    }
+    if (trade.tb) {
+      this.tokenVolumes.set(trade.tb, (this.tokenVolumes.get(trade.tb) || 0) + trade.vu / 2);
+    }
 
     // FIRST TRADE EVER: Initialize current slot
     if (this.currentSlot === 0) {
@@ -162,5 +178,51 @@ export class DataProcessor {
    */
   setGracePeriod(ms: number) {
     this.gracePeriodMs = ms;
+  }
+
+  /**
+   * Get top N programs by volume
+   */
+  getTopPrograms(limit: number = this.maxTracked): string[] {
+    return Array.from(this.programVolumes.entries())
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, limit)
+      .map(([program]) => program);
+  }
+
+  /**
+   * Get top N tokens by volume
+   */
+  getTopTokens(limit: number = this.maxTracked): string[] {
+    return Array.from(this.tokenVolumes.entries())
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, limit)
+      .map(([token]) => token);
+  }
+
+  /**
+   * Get program volumes map
+   */
+  getProgramVolumes(): Map<string, number> {
+    return this.programVolumes;
+  }
+
+  /**
+   * Get token volumes map
+   */
+  getTokenVolumes(): Map<string, number> {
+    return this.tokenVolumes;
+  }
+
+  /**
+   * Decay all volumes (for smooth transitions)
+   */
+  decayVolumes(factor: number = 0.98) {
+    this.programVolumes.forEach((volume, program) => {
+      this.programVolumes.set(program, volume * factor);
+    });
+    this.tokenVolumes.forEach((volume, token) => {
+      this.tokenVolumes.set(token, volume * factor);
+    });
   }
 }

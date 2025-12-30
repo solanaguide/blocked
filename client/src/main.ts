@@ -8,6 +8,7 @@ import { LightningNetwork } from './visualizations/LightningNetwork';
 import { VRTunnel } from './visualizations/VRTunnel';
 import { HeatmapGrid } from './visualizations/HeatmapGrid';
 import { ParticleNebula } from './visualizations/ParticleNebula';
+import { DoubleSidedEQ } from './visualizations/DoubleSidedEQ';
 import { HUD } from './hud/HUD';
 import type { WSMessage, BatchMessage, BlockCompleteMessage, StatsMessage } from '../../shared/types';
 import type { FocusMode, ParticleShape } from './types';
@@ -27,6 +28,7 @@ sceneManager.registerScene('lightning', () => new LightningNetwork());
 sceneManager.registerScene('tunnel', () => new VRTunnel());
 sceneManager.registerScene('heatmap', () => new HeatmapGrid());
 sceneManager.registerScene('nebula', () => new ParticleNebula());
+sceneManager.registerScene('doublesidedeq', () => new DoubleSidedEQ());
 
 // Start with blocks visualization
 sceneManager.switchScene('blocks');

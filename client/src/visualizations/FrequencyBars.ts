@@ -6,16 +6,20 @@ import type { BlockData } from '../types';
 
 /**
  * FrequencyBars - Classic Winamp-style EQ visualization
- * Vertical bars for each program, height = volume, with gradient coloring
+ *
+ * CONCEPT: Vertical bars representing top trading programs (like Winamp equalizer).
+ * - Each bar = a program (Jupiter, Raydium, Orca, etc.)
+ * - Bar HEIGHT = trade volume for that program (logarithmic scale)
+ * - Bar COLOR = program's signature color with emissive glow
+ * - Block change triggers bloom pulse and grid flash (bass kick effect)
+ * - Shows top 10 programs dynamically (updates as trading patterns change)
  */
 export class FrequencyBars extends BaseVisualization {
   private bars: Map<string, BarMesh> = new Map();
   private programData: Map<string, { volume: number; trades: number; target: number }> = new Map();
   private gridFloor: THREE.GridHelper;
   private bloomIntensity: number = 0;
-
-  // Known programs to show as bars
-  private programs = ['JUP', 'RAYDIUM_CLMM', 'RAYDIUM_CP', 'ORCA', 'PHOENIX', 'LIFINITY', 'FLASH'];
+  private maxBars = 10; // Show top 10 programs dynamically
 
   constructor() {
     super();
@@ -40,53 +44,83 @@ export class FrequencyBars extends BaseVisualization {
     rimLight.position.set(-10, 10, -10);
     this.scene.add(rimLight);
 
-    // Create bars for each program
-    this.createBars();
+    // Bars are created dynamically as programs appear
   }
 
-  private createBars(): void {
+  private createOrUpdateBar(program: string, index: number, totalBars: number): void {
+    if (this.bars.has(program)) return; // Bar already exists
+
     const barWidth = 3;
     const barSpacing = 5;
-    const totalWidth = this.programs.length * barSpacing;
+    const totalWidth = totalBars * barSpacing;
+    const startX = -totalWidth / 2;
+    const x = startX + index * barSpacing;
+    const color = programColors.get(program) || 0x8b5cf6;
+
+    // Create bar geometry (starts at height 0.1)
+    const geometry = new THREE.BoxGeometry(barWidth, 0.1, barWidth);
+
+    // Create gradient material
+    const material = new THREE.MeshStandardMaterial({
+      color: color,
+      emissive: color,
+      emissiveIntensity: 0.5,
+      metalness: 0.8,
+      roughness: 0.2,
+    });
+
+    const mesh = new THREE.Mesh(geometry, material);
+    mesh.position.set(x, 0, 0);
+
+    // Add edges for that retro look
+    const edges = new THREE.EdgesGeometry(geometry);
+    const lineMaterial = new THREE.LineBasicMaterial({ color: 0xffffff, linewidth: 2 });
+    const wireframe = new THREE.LineSegments(edges, lineMaterial);
+    mesh.add(wireframe);
+
+    this.scene.add(mesh);
+
+    this.bars.set(program, {
+      mesh,
+      baseColor: color,
+      currentHeight: 0.1,
+      targetHeight: 0.1,
+      wireframe,
+      program,
+    });
+  }
+
+  private repositionBars(): void {
+    // Sort programs by volume to get top N
+    const sorted = Array.from(this.programData.entries())
+      .sort((a, b) => b[1].volume - a[1].volume)
+      .slice(0, this.maxBars);
+
+    const barWidth = 3;
+    const barSpacing = 5;
+    const totalWidth = sorted.length * barSpacing;
     const startX = -totalWidth / 2;
 
-    this.programs.forEach((program, index) => {
+    // Reposition existing bars and create new ones
+    sorted.forEach(([program, data], index) => {
       const x = startX + index * barSpacing;
-      const color = programColors.get(program) || 0x8b5cf6;
+      this.createOrUpdateBar(program, index, sorted.length);
 
-      // Create bar geometry (starts at height 0.1)
-      const geometry = new THREE.BoxGeometry(barWidth, 0.1, barWidth);
+      const bar = this.bars.get(program)!;
+      bar.mesh.position.x = x;
+    });
 
-      // Create gradient material
-      const material = new THREE.MeshStandardMaterial({
-        color: color,
-        emissive: color,
-        emissiveIntensity: 0.5,
-        metalness: 0.8,
-        roughness: 0.2,
-      });
-
-      const mesh = new THREE.Mesh(geometry, material);
-      mesh.position.set(x, 0, 0);
-
-      // Add edges for that retro look
-      const edges = new THREE.EdgesGeometry(geometry);
-      const lineMaterial = new THREE.LineBasicMaterial({ color: 0xffffff, linewidth: 2 });
-      const wireframe = new THREE.LineSegments(edges, lineMaterial);
-      mesh.add(wireframe);
-
-      this.scene.add(mesh);
-
-      this.bars.set(program, {
-        mesh,
-        baseColor: color,
-        currentHeight: 0.1,
-        targetHeight: 0.1,
-        wireframe,
-      });
-
-      // Initialize program data
-      this.programData.set(program, { volume: 0, trades: 0, target: 0.1 });
+    // Remove bars not in top N
+    const topPrograms = new Set(sorted.map(([p]) => p));
+    this.bars.forEach((bar, program) => {
+      if (!topPrograms.has(program)) {
+        this.scene.remove(bar.mesh);
+        bar.mesh.geometry.dispose();
+        (bar.mesh.material as THREE.Material).dispose();
+        bar.wireframe.geometry.dispose();
+        (bar.wireframe.material as THREE.Material).dispose();
+        this.bars.delete(program);
+      }
     });
   }
 
@@ -135,6 +169,12 @@ export class FrequencyBars extends BaseVisualization {
   }
 
   update(deltaTime: number): void {
+    // Periodically reposition bars based on top programs
+    const time = this.clock.getElapsedTime();
+    if (Math.floor(time) % 2 === 0 && Math.floor(time * 10) % 10 === 0) {
+      this.repositionBars();
+    }
+
     // Smooth bar height transitions
     this.bars.forEach((bar, program) => {
       const data = this.programData.get(program);
@@ -176,7 +216,6 @@ export class FrequencyBars extends BaseVisualization {
     }
 
     // Rotate camera slightly for dynamic view
-    const time = this.clock.getElapsedTime();
     this.camera.position.x = Math.sin(time * 0.1) * 5;
   }
 
@@ -200,4 +239,5 @@ interface BarMesh {
   baseColor: number;
   currentHeight: number;
   targetHeight: number;
+  program: string;
 }

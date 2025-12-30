@@ -2,8 +2,8 @@ import * as THREE from 'three';
 
 export class Environment {
   private scene: THREE.Scene;
-  private grid: THREE.GridHelper;
-  private gridMaterial: THREE.ShaderMaterial;
+  private grid!: THREE.GridHelper;
+  private gridMaterial!: THREE.ShaderMaterial;
 
   constructor(scene: THREE.Scene) {
     this.scene = scene;

@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { IVisualization, IHUDConfig } from './IVisualization';
+import type { DataProcessor } from '../data/DataProcessor';
 import type { TradeMessage } from '../../../shared/types';
 import type { BlockData, FocusMode, ParticleShape } from '../types';
 
@@ -13,6 +14,7 @@ export abstract class BaseVisualization implements IVisualization {
   protected renderer: THREE.WebGLRenderer;
   protected clock: THREE.Clock;
   protected container: HTMLElement | null = null;
+  protected dataProcessor: DataProcessor | null = null;
 
   private resizeHandler: (() => void) | null = null;
 
@@ -49,10 +51,11 @@ export abstract class BaseVisualization implements IVisualization {
   }
 
   /**
-   * Initialize visualization by attaching to container
+   * Initialize visualization by attaching to container and providing data processor
    */
-  init(container: HTMLElement): void {
+  init(container: HTMLElement, dataProcessor: DataProcessor): void {
     this.container = container;
+    this.dataProcessor = dataProcessor;
 
     // Clear any existing content
     while (container.firstChild) {

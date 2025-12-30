@@ -5,99 +5,147 @@ import type { TradeMessage } from '../../../shared/types';
 import type { BlockData } from '../types';
 
 /**
- * LightningNetwork - Programs as nodes, trades as lightning bolts
+ * LightningNetwork - Network graph of programs and tokens with lightning bolts
+ *
+ * CONCEPT: 3D network where nodes represent programs/tokens, trades = lightning bolts.
+ * - Inner circle = Top programs (Jupiter, Raydium, etc.)
+ * - Outer circle = Top tokens (SOL, USDC, USDT, etc.)
+ * - Lightning bolt connects source program to random target
+ * - Bolt THICKNESS = trade volume (bigger trades = thicker bolts)
+ * - Node SIZE pulses with accumulated energy
+ * - Block change = all nodes pulse simultaneously (network sync)
  */
 export class LightningNetwork extends BaseVisualization {
   private nodes: Map<string, ProgramNode> = new Map();
   private bolts: LightningBolt[] = [];
-  private programs = ['JUP', 'RAYDIUM_CLMM', 'RAYDIUM_CP', 'ORCA', 'PHOENIX', 'LIFINITY', 'FLASH'];
   private cameraAngle: number = 0;
   private energyPulse: number = 0;
+
+  // Track programs/tokens dynamically
+  private topPrograms: string[] = [];
+  private topTokens: string[] = [];
+  private programVolumes: Map<string, number> = new Map();
+  private tokenVolumes: Map<string, number> = new Map();
 
   constructor() {
     super();
 
-    this.camera.position.set(0, 20, 40);
+    this.camera.position.set(0, 30, 60);
     this.camera.lookAt(0, 0, 0);
-
-    // Create program nodes in a circle
-    const radius = 20;
-    this.programs.forEach((program, index) => {
-      const angle = (index / this.programs.length) * Math.PI * 2;
-      const x = Math.cos(angle) * radius;
-      const z = Math.sin(angle) * radius;
-      const y = (Math.random() - 0.5) * 10;
-
-      const color = programColors.get(program) || 0x8b5cf6;
-
-      // Create sphere node
-      const geometry = new THREE.SphereGeometry(2, 16, 16);
-      const material = new THREE.MeshStandardMaterial({
-        color: color,
-        emissive: color,
-        emissiveIntensity: 0.5,
-        metalness: 0.8,
-        roughness: 0.2,
-      });
-
-      const mesh = new THREE.Mesh(geometry, material);
-      mesh.position.set(x, y, z);
-
-      // Add glow
-      const glow = new THREE.PointLight(color, 1, 30);
-      glow.position.copy(mesh.position);
-
-      // Add wireframe
-      const wireGeometry = new THREE.SphereGeometry(2.2, 8, 8);
-      const wireMaterial = new THREE.MeshBasicMaterial({
-        color: color,
-        wireframe: true,
-        transparent: true,
-        opacity: 0.3,
-      });
-      const wireframe = new THREE.Mesh(wireGeometry, wireMaterial);
-      wireframe.position.copy(mesh.position);
-
-      this.scene.add(mesh);
-      this.scene.add(glow);
-      this.scene.add(wireframe);
-
-      this.nodes.set(program, {
-        mesh,
-        glow,
-        wireframe,
-        position: new THREE.Vector3(x, y, z),
-        energy: 0,
-      });
-    });
 
     // Ambient light
     const ambientLight = new THREE.AmbientLight(0x8b5cf6, 0.2);
     this.scene.add(ambientLight);
 
-    // Add connection lines between nodes
-    this.createConnections();
+    // Nodes are created dynamically based on trading activity
   }
 
-  private createConnections(): void {
-    const nodeArray = Array.from(this.nodes.values());
+  private updateNetwork(): void {
+    // Get top 8 programs and top 8 tokens by volume
+    const sortedPrograms = Array.from(this.programVolumes.entries())
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 8)
+      .map(([p]) => p);
 
-    for (let i = 0; i < nodeArray.length; i++) {
-      for (let j = i + 1; j < nodeArray.length; j++) {
-        const start = nodeArray[i].position;
-        const end = nodeArray[j].position;
+    const sortedTokens = Array.from(this.tokenVolumes.entries())
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 8)
+      .map(([t]) => t);
 
-        const geometry = new THREE.BufferGeometry().setFromPoints([start, end]);
-        const material = new THREE.LineBasicMaterial({
-          color: 0x8b5cf6,
-          transparent: true,
-          opacity: 0.1,
-        });
+    // Only update if changed
+    const programsChanged = JSON.stringify(sortedPrograms) !== JSON.stringify(this.topPrograms);
+    const tokensChanged = JSON.stringify(sortedTokens) !== JSON.stringify(this.topTokens);
 
-        const line = new THREE.Line(geometry, material);
-        this.scene.add(line);
+    if (!programsChanged && !tokensChanged) return;
+
+    this.topPrograms = sortedPrograms;
+    this.topTokens = sortedTokens;
+
+    // Remove old nodes not in top lists
+    const allTopIds = new Set([...this.topPrograms, ...this.topTokens]);
+    this.nodes.forEach((node, id) => {
+      if (!allTopIds.has(id)) {
+        this.scene.remove(node.mesh);
+        this.scene.remove(node.glow);
+        this.scene.remove(node.wireframe);
+        node.mesh.geometry.dispose();
+        (node.mesh.material as THREE.Material).dispose();
+        (node.wireframe.material as THREE.Material).dispose();
+        this.nodes.delete(id);
       }
-    }
+    });
+
+    // Create nodes in two circles
+    const innerRadius = 15; // Programs
+    const outerRadius = 30; // Tokens
+
+    // Create program nodes (inner circle)
+    this.topPrograms.forEach((program, index) => {
+      if (this.nodes.has(program)) return;
+
+      const angle = (index / this.topPrograms.length) * Math.PI * 2;
+      const x = Math.cos(angle) * innerRadius;
+      const z = Math.sin(angle) * innerRadius;
+      const y = 0;
+
+      const color = programColors.get(program) || 0x8b5cf6;
+      this.createNode(program, x, y, z, color, 2.5);
+    });
+
+    // Create token nodes (outer circle)
+    this.topTokens.forEach((token, index) => {
+      if (this.nodes.has(token)) return;
+
+      const angle = (index / this.topTokens.length) * Math.PI * 2;
+      const x = Math.cos(angle) * outerRadius;
+      const z = Math.sin(angle) * outerRadius;
+      const y = 0;
+
+      const color = 0x06ffa5; // Green for tokens
+      this.createNode(token, x, y, z, color, 1.8);
+    });
+  }
+
+  private createNode(id: string, x: number, y: number, z: number, color: number, size: number): void {
+    // Create sphere node
+    const geometry = new THREE.SphereGeometry(size, 16, 16);
+    const material = new THREE.MeshStandardMaterial({
+      color: color,
+      emissive: color,
+      emissiveIntensity: 0.5,
+      metalness: 0.8,
+      roughness: 0.2,
+    });
+
+    const mesh = new THREE.Mesh(geometry, material);
+    mesh.position.set(x, y, z);
+
+    // Add glow
+    const glow = new THREE.PointLight(color, 1, 30);
+    glow.position.copy(mesh.position);
+
+    // Add wireframe
+    const wireGeometry = new THREE.SphereGeometry(size * 1.1, 8, 8);
+    const wireMaterial = new THREE.MeshBasicMaterial({
+      color: color,
+      wireframe: true,
+      transparent: true,
+      opacity: 0.3,
+    });
+    const wireframe = new THREE.Mesh(wireGeometry, wireMaterial);
+    wireframe.position.copy(mesh.position);
+
+    this.scene.add(mesh);
+    this.scene.add(glow);
+    this.scene.add(wireframe);
+
+    this.nodes.set(id, {
+      mesh,
+      glow,
+      wireframe,
+      position: new THREE.Vector3(x, y, z),
+      energy: 0,
+    });
   }
 
   getName(): string {
@@ -106,21 +154,36 @@ export class LightningNetwork extends BaseVisualization {
 
   onTrade(trade: TradeMessage, slot: number): void {
     const program = trade.p;
+    const token = trade.ta || 'UNKNOWN'; // Use token_a as primary token
+    const volume = trade.vu;
 
-    if (!this.nodes.has(program)) return;
+    // Track volumes
+    this.programVolumes.set(program, (this.programVolumes.get(program) || 0) + volume);
+    this.tokenVolumes.set(token, (this.tokenVolumes.get(token) || 0) + volume);
 
-    // Pick a random target node
-    const nodeArray = Array.from(this.nodes.values());
-    const targetNode = nodeArray[Math.floor(Math.random() * nodeArray.length)];
+    // Update network periodically
+    const time = this.clock.getElapsedTime();
+    if (Math.floor(time) % 3 === 0 && Math.floor(time * 10) % 10 === 0) {
+      this.updateNetwork();
+    }
 
-    const sourceNode = this.nodes.get(program)!;
+    // Create lightning bolt if nodes exist
+    const sourceNode = this.nodes.get(program);
+    if (!sourceNode) return;
+
+    // Try to find token node, otherwise pick random
+    let targetNode = this.nodes.get(token);
+    if (!targetNode) {
+      const nodeArray = Array.from(this.nodes.values());
+      if (nodeArray.length === 0) return;
+      targetNode = nodeArray[Math.floor(Math.random() * nodeArray.length)];
+    }
 
     // Add energy to source node
-    sourceNode.energy += trade.vu;
+    sourceNode.energy += volume;
 
-    // Create lightning bolt
-    const volume = trade.vu;
-    const thickness = Math.min(0.5, 0.05 + Math.log10(Math.max(1, volume)) * 0.05);
+    // Create lightning bolt - BIGGER THICKNESS for larger trades
+    const thickness = Math.min(2.0, 0.2 + Math.log10(Math.max(1, volume)) * 0.3);
 
     this.createLightningBolt(sourceNode.position, targetNode.position, programColors.get(program) || 0xffffff, thickness);
   }

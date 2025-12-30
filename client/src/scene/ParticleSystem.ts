@@ -11,7 +11,7 @@ export class ParticleSystem {
   // Instanced meshes for each geometry type
   private instancedMeshes: Map<ParticleShape, THREE.InstancedMesh> = new Map();
   private geometries: Map<ParticleShape, THREE.BufferGeometry> = new Map();
-  private material: THREE.MeshStandardMaterial;
+  private material!: THREE.MeshStandardMaterial;
 
   // Instance tracking
   private maxInstances = 10000; // Increased for high-throughput scenarios
