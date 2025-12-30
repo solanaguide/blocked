@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import type { TradeMessage } from '../../../shared/types';
 import type { Particle, ParticleShape, FocusMode } from '../types';
+import { programColors, tokenColors, hashColor } from '../utils/colors';
 
 export class ParticleSystem {
   private scene: THREE.Scene;
@@ -18,25 +19,6 @@ export class ParticleSystem {
   private currentShape: ParticleShape = 'cube';
   private focusMode: FocusMode = 'program'; // Default to program for more color variety
   private sizeMultiplier = 1.0;
-
-  // Program colors (vaporwave palette)
-  private programColors: Map<string, number> = new Map([
-    ['JUP', 0xb026ff],          // Jupiter - Electric Purple
-    ['RAYDIUM_CLMM', 0x00f0ff], // Raydium CLMM - Neon Blue
-    ['RAYDIUM_CP', 0xff006e],   // Raydium CP - Hot Pink
-    ['RAYDIUM_CPMM', 0xff1493], // Raydium CPMM - Deep Pink
-    ['ORCA', 0x00ffd4],         // Orca - Cyan
-    ['PHOENIX', 0xff6b35],      // Phoenix - Orange
-    ['LIFINITY', 0x00ff88],     // Lifinity - Green
-    ['FLASH', 0xffff00],        // Flash - Yellow
-  ]);
-
-  // Token colors
-  private tokenColors: Map<string, number> = new Map([
-    ['SOL', 0xffd700],    // Gold
-    ['USDC', 0x00ffd4],   // Cyan
-    ['USDT', 0x26a17b],   // Green
-  ]);
 
   constructor(scene: THREE.Scene) {
     this.scene = scene;
@@ -243,14 +225,14 @@ export class ParticleSystem {
 
     switch (this.focusMode) {
       case 'program':
-        color = this.programColors.get(trade.p) || 0xffffff;
+        color = programColors.get(trade.p) || 0xffffff;
         if (Math.random() < 0.01) {
           console.log(`🎨 PROGRAM mode: ${trade.p} → 0x${color.toString(16)}`);
         }
         return color;
 
       case 'token':
-        color = this.tokenColors.get(trade.ta) || this.hashColor(trade.ta);
+        color = tokenColors.get(trade.ta) || hashColor(trade.ta);
         if (Math.random() < 0.01) {
           console.log(`🎨 TOKEN mode: ${trade.ta} → 0x${color.toString(16)}`);
         }
@@ -278,15 +260,6 @@ export class ParticleSystem {
         }
         return 0xffffff;
     }
-  }
-
-  private hashColor(str: string): number {
-    let hash = 0;
-    for (let i = 0; i < str.length; i++) {
-      hash = str.charCodeAt(i) + ((hash << 5) - hash);
-    }
-    // Convert to vibrant color
-    return (hash & 0x00FFFFFF) | 0x404040; // Ensure minimum brightness
   }
 
   private updateAllParticles() {

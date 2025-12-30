@@ -1,4 +1,5 @@
 import * as d3 from 'd3';
+import { programColors, tokenColors, hashColor, colorToHex } from '../utils/colors';
 
 export class HUD {
   private volumeHistory: { time: number; volume: number }[] = [];
@@ -112,15 +113,20 @@ export class HUD {
 
     for (const [program, count] of sorted) {
       const percent = total > 0 ? (count / total) * 100 : 0;
+      const color = programColors.get(program) || 0xffffff;
+      const hexColor = colorToHex(color);
 
       const item = document.createElement('div');
       item.className = 'leaderboard-item';
 
       item.innerHTML = `
-        <div class="leaderboard-name">${this.formatProgramName(program)}</div>
+        <div class="leaderboard-name">
+          <span class="color-dot" style="background-color: ${hexColor};"></span>
+          ${this.formatProgramName(program)}
+        </div>
         <div class="leaderboard-value">${percent.toFixed(1)}%</div>
         <div class="leaderboard-bar">
-          <div class="leaderboard-bar-fill" style="width: ${percent}%"></div>
+          <div class="leaderboard-bar-fill" style="width: ${percent}%; background-color: ${hexColor};"></div>
         </div>
       `;
 
@@ -156,15 +162,20 @@ export class HUD {
 
     for (const [token, volume] of sorted) {
       const percent = total > 0 ? (volume / total) * 100 : 0;
+      const color = tokenColors.get(token) || hashColor(token);
+      const hexColor = colorToHex(color);
 
       const item = document.createElement('div');
       item.className = 'leaderboard-item';
 
       item.innerHTML = `
-        <div class="leaderboard-name">${token}</div>
+        <div class="leaderboard-name">
+          <span class="color-dot" style="background-color: ${hexColor};"></span>
+          ${token}
+        </div>
         <div class="leaderboard-value">$${this.formatNumber(volume)}</div>
         <div class="leaderboard-bar">
-          <div class="leaderboard-bar-fill" style="width: ${percent}%"></div>
+          <div class="leaderboard-bar-fill" style="width: ${percent}%; background-color: ${hexColor};"></div>
         </div>
       `;
 
