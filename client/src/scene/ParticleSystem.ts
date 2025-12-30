@@ -176,7 +176,7 @@ export class ParticleSystem {
     particle.rotation.set(0, 0, 0);
     particle.rotationSpeed.set(0, 0, 0);
     particle.lifetime = 0;
-    particle.maxLifetime = 500; // 500ms - orphan cleanup
+    particle.maxLifetime = 1000; // 1000ms - increased to allow particles time to fall
     particle.trade = trade;
     particle.locked = false;
     particle.lockedPosition.set(0, 0, 0);
@@ -298,9 +298,9 @@ export class ParticleSystem {
       if (!particle.locked) {
         particle.lifetime += deltaTime;
 
-        // Orphan cleanup: Remove unlocked particles after 500ms
-        if (particle.lifetime > particle.maxLifetime) {
-          if (Math.random() < 0.05) console.log(`♻️ Removing orphan particle ${particle.id.slice(0,6)} from slot ${particle.slot} (500ms timeout)`);
+        // Orphan cleanup: Remove unlocked particles after 1000ms (increased to allow time to fall)
+        if (particle.lifetime > 1000) {
+          if (Math.random() < 0.05) console.log(`♻️ Removing orphan particle ${particle.id.slice(0,6)} from slot ${particle.slot} (1000ms timeout)`);
           this.particles.delete(particle.id);
           continue;
         }
@@ -314,16 +314,32 @@ export class ParticleSystem {
       }
 
       if (!particle.locked) {
-        // Check if this particle's block is sweeping - if so, FORCE LOCK immediately
+        // Check if this particle's block is sweeping
         if (blockBuilder.isBlockSweeping(particle.slot)) {
-          const forceLockResult = blockBuilder.forceLockParticle(particle.id, particle.slot, particle.position);
-          if (forceLockResult.locked && forceLockResult.gridPosition) {
-            particle.locked = true;
-            particle.lockedPosition.copy(forceLockResult.gridPosition);
-            particle.velocity.set(0, 0, 0);
-            if (Math.random() < 0.05) {
-              console.log(`⚡ Force-locked particle ${particle.id.slice(0,6)} to sweeping block ${particle.slot}`);
+          // Only force-lock if particle is INSIDE or NEAR the container
+          // Otherwise just remove it (it never made it in time)
+          const blockHalfSize = 15;
+          const isNearBlock = Math.abs(particle.position.x) < blockHalfSize * 1.5 &&
+                              Math.abs(particle.position.z) < blockHalfSize * 1.5 &&
+                              particle.position.y < 10; // Must have fallen close to block
+
+          if (isNearBlock) {
+            const forceLockResult = blockBuilder.forceLockParticle(particle.id, particle.slot, particle.position);
+            if (forceLockResult.locked && forceLockResult.gridPosition) {
+              particle.locked = true;
+              particle.lockedPosition.copy(forceLockResult.gridPosition);
+              particle.velocity.set(0, 0, 0);
+              if (Math.random() < 0.05) {
+                console.log(`⚡ Force-locked particle ${particle.id.slice(0,6)} to sweeping block ${particle.slot}`);
+              }
             }
+          } else {
+            // Particle never made it - remove it instead of orphaning
+            if (Math.random() < 0.05) {
+              console.log(`🚫 Removing particle ${particle.id.slice(0,6)} - didn't make it to block ${particle.slot} in time`);
+            }
+            this.particles.delete(particle.id);
+            continue;
           }
         } else {
           // CONTAINER APPROACH: Particles rain down, maintaining their downward velocity
@@ -371,6 +387,15 @@ export class ParticleSystem {
         if (blockPosition) {
           // Particle world position = block position + relative offset
           particle.position.copy(blockPosition).add(particle.lockedPosition);
+
+          // Clean up particles that swept too far off screen
+          if (particle.position.x > 130) {
+            if (Math.random() < 0.05) {
+              console.log(`🗑️ Removing particle ${particle.id.slice(0,6)} - swept off screen at x=${particle.position.x.toFixed(1)}`);
+            }
+            this.particles.delete(particle.id);
+            continue;
+          }
         }
       }
 
