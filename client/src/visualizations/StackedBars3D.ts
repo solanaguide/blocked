@@ -97,6 +97,12 @@ export class StackedBars3D extends BaseVisualization {
           this.scene.remove(segment.mesh);
           segment.mesh.geometry.dispose();
           (segment.mesh.material as THREE.Material).dispose();
+
+          // Remove from interactive objects
+          const objIndex = this.interactiveObjects.findIndex(obj => obj.mesh === segment.mesh);
+          if (objIndex !== -1) {
+            this.interactiveObjects.splice(objIndex, 1);
+          }
         });
         this.bars.splice(index, 1);
       }
@@ -179,6 +185,15 @@ export class StackedBars3D extends BaseVisualization {
 
       this.scene.add(mesh);
 
+      // Add to interactive objects for tooltips
+      this.interactiveObjects.push({
+        mesh,
+        data: {
+          program,
+          volume,
+        },
+      });
+
       segments.push({
         mesh,
         program,
@@ -200,6 +215,12 @@ export class StackedBars3D extends BaseVisualization {
         this.scene.remove(segment.mesh);
         segment.mesh.geometry.dispose();
         (segment.mesh.material as THREE.Material).dispose();
+
+        // Remove from interactive objects
+        const objIndex = this.interactiveObjects.findIndex(obj => obj.mesh === segment.mesh);
+        if (objIndex !== -1) {
+          this.interactiveObjects.splice(objIndex, 1);
+        }
       });
     }
 

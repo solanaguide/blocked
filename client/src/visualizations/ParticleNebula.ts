@@ -84,6 +84,8 @@ export class ParticleNebula extends BaseVisualization {
   onTrade(trade: TradeMessage, slot: number): void {
     const program = trade.p;
     const volume = trade.vu;
+    const token = trade.ta || 'UNKNOWN';
+    const signature = trade.sig;
 
     // Get cluster position or create random position
     let clusterPos = this.programClusters.get(program);
@@ -121,6 +123,18 @@ export class ParticleNebula extends BaseVisualization {
 
     this.scene.add(mesh);
 
+    // Add to interactive objects for tooltips
+    this.interactiveObjects.push({
+      mesh,
+      data: {
+        program,
+        token,
+        volume,
+        signature,
+        slot,
+      },
+    });
+
     // Random drift velocity
     const velocity = new THREE.Vector3(
       (Math.random() - 0.5) * 0.05,
@@ -143,6 +157,12 @@ export class ParticleNebula extends BaseVisualization {
       this.scene.remove(oldest.mesh);
       oldest.mesh.geometry.dispose();
       (oldest.mesh.material as THREE.Material).dispose();
+
+      // Remove from interactive objects
+      const objIndex = this.interactiveObjects.findIndex(obj => obj.mesh === oldest.mesh);
+      if (objIndex !== -1) {
+        this.interactiveObjects.splice(objIndex, 1);
+      }
     }
   }
 
@@ -197,6 +217,12 @@ export class ParticleNebula extends BaseVisualization {
         particle.mesh.geometry.dispose();
         (particle.mesh.material as THREE.Material).dispose();
         this.particles.splice(index, 1);
+
+        // Remove from interactive objects
+        const objIndex = this.interactiveObjects.findIndex(obj => obj.mesh === particle.mesh);
+        if (objIndex !== -1) {
+          this.interactiveObjects.splice(objIndex, 1);
+        }
       }
     });
 

@@ -126,6 +126,14 @@ export class NyanTrade extends BaseVisualization {
     this.tailRibbon = new THREE.Mesh(this.tailGeometry, material);
     this.tailRibbon.position.set(-10, 0, 0); // Position behind cat
     this.scene.add(this.tailRibbon);
+
+    // Make tail ribbon interactive
+    this.interactiveObjects.push({
+      mesh: this.tailRibbon,
+      data: {
+        // Will be updated dynamically in update()
+      },
+    });
   }
 
   private updateTailGeometry(positions: Float32Array, colors: Float32Array): void {
@@ -276,6 +284,20 @@ export class NyanTrade extends BaseVisualization {
       this.updateTailGeometry(positions, colors);
       this.tailGeometry.attributes.position.needsUpdate = true;
       this.tailGeometry.attributes.color.needsUpdate = true;
+    }
+
+    // Update interactive data for tail ribbon tooltip
+    if (this.tailRibbon && this.dataProcessor && this.interactiveObjects.length > 0) {
+      const topTokens = this.dataProcessor.getTopTokens(6);
+      const totalVolume = Array.from(this.currentTokenVolumes.values()).reduce((a, b) => a + b, 0);
+      const obj = this.interactiveObjects.find(o => o.mesh === this.tailRibbon);
+      if (obj) {
+        obj.data = {
+          token: topTokens.slice(0, 3).join(', '),
+          volume: totalVolume,
+          programs: topTokens.length,
+        };
+      }
     }
 
     // Bounce cat up and down

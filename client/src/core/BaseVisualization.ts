@@ -3,6 +3,7 @@ import { IVisualization, IHUDConfig } from './IVisualization';
 import type { DataProcessor } from '../data/DataProcessor';
 import type { TradeMessage } from '../../../shared/types';
 import type { BlockData, FocusMode, ParticleShape } from '../types';
+import { Tooltip, type InteractiveObject } from '../utils/Tooltip';
 
 /**
  * Base class for all visualizations
@@ -16,7 +17,16 @@ export abstract class BaseVisualization implements IVisualization {
   protected container: HTMLElement | null = null;
   protected dataProcessor: DataProcessor | null = null;
 
+  // Interaction support
+  protected tooltip: Tooltip;
+  protected raycaster: THREE.Raycaster;
+  protected mouse: THREE.Vector2;
+  protected interactiveObjects: InteractiveObject[] = [];
+  protected hoveredObject: InteractiveObject | null = null;
+
   private resizeHandler: (() => void) | null = null;
+  private mouseMoveHandler: ((event: MouseEvent) => void) | null = null;
+  private clickHandler: ((event: MouseEvent) => void) | null = null;
 
   constructor() {
     // Create scene
@@ -45,6 +55,11 @@ export abstract class BaseVisualization implements IVisualization {
     // Setup clock
     this.clock = new THREE.Clock();
 
+    // Initialize interaction support
+    this.tooltip = new Tooltip();
+    this.raycaster = new THREE.Raycaster();
+    this.mouse = new THREE.Vector2();
+
     // Handle window resize
     this.resizeHandler = this.onWindowResize.bind(this);
     window.addEventListener('resize', this.resizeHandler);
@@ -65,6 +80,12 @@ export abstract class BaseVisualization implements IVisualization {
     // Append renderer
     container.appendChild(this.renderer.domElement);
 
+    // Setup interaction event handlers
+    this.mouseMoveHandler = this.onMouseMove.bind(this);
+    this.clickHandler = this.onMouseClick.bind(this);
+    window.addEventListener('mousemove', this.mouseMoveHandler);
+    window.addEventListener('click', this.clickHandler);
+
     // NOTE: Animation loop is managed by SceneManager, not here
     console.log(`✨ ${this.getName()} initialized`);
   }
@@ -78,6 +99,20 @@ export abstract class BaseVisualization implements IVisualization {
       window.removeEventListener('resize', this.resizeHandler);
       this.resizeHandler = null;
     }
+
+    // Remove interaction handlers
+    if (this.mouseMoveHandler) {
+      window.removeEventListener('mousemove', this.mouseMoveHandler);
+      this.mouseMoveHandler = null;
+    }
+    if (this.clickHandler) {
+      window.removeEventListener('click', this.clickHandler);
+      this.clickHandler = null;
+    }
+
+    // Dispose tooltip
+    this.tooltip.dispose();
+    this.interactiveObjects = [];
 
     // Dispose renderer
     this.renderer.dispose();
@@ -134,6 +169,68 @@ export abstract class BaseVisualization implements IVisualization {
       showTokenLeaderboard: true,
       showCharts: true,
     };
+  }
+
+  /**
+   * Handle mouse move for raycasting and tooltips
+   */
+  private onMouseMove(event: MouseEvent): void {
+    // Convert mouse position to normalized device coordinates (-1 to +1)
+    this.mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
+    this.mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
+
+    // Update interactions
+    this.updateInteractions(event.clientX, event.clientY);
+  }
+
+  /**
+   * Handle mouse click for opening Solscan links
+   */
+  private onMouseClick(event: MouseEvent): void {
+    if (this.hoveredObject?.data.signature) {
+      window.open(`https://solscan.io/tx/${this.hoveredObject.data.signature}`, '_blank');
+    }
+  }
+
+  /**
+   * Update raycasting and show/hide tooltip
+   */
+  protected updateInteractions(mouseX: number, mouseY: number): void {
+    if (this.interactiveObjects.length === 0) {
+      this.tooltip.hide();
+      this.hoveredObject = null;
+      return;
+    }
+
+    // Raycast from camera through mouse position
+    this.raycaster.setFromCamera(this.mouse, this.camera);
+
+    // Get all meshes from interactive objects
+    const meshes = this.interactiveObjects.map(obj => obj.mesh);
+    const intersects = this.raycaster.intersectObjects(meshes, true);
+
+    if (intersects.length > 0) {
+      // Find the interactive object that was hit
+      const hitMesh = intersects[0].object;
+      const obj = this.interactiveObjects.find(o => o.mesh === hitMesh || o.mesh.children.includes(hitMesh));
+
+      if (obj) {
+        // Show tooltip with trade info
+        const content = Tooltip.formatTradeInfo(obj.data);
+        this.tooltip.show(mouseX, mouseY, content);
+        this.hoveredObject = obj;
+
+        // Change cursor to pointer if clickable
+        if (obj.data.signature) {
+          document.body.style.cursor = 'pointer';
+        }
+      }
+    } else {
+      // No intersection - hide tooltip
+      this.tooltip.hide();
+      this.hoveredObject = null;
+      document.body.style.cursor = 'default';
+    }
   }
 
   // Abstract methods that subclasses must implement

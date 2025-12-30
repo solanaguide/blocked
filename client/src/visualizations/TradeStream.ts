@@ -70,6 +70,8 @@ export class TradeStream extends BaseVisualization {
   onTrade(trade: TradeMessage, slot: number): void {
     const program = trade.p;
     const volume = trade.vu;
+    const token = trade.ta || 'UNKNOWN';
+    const signature = trade.sig;
 
     // Create particle
     const size = Math.min(3, 0.5 + Math.log10(Math.max(1, volume)) * 0.3);
@@ -106,6 +108,18 @@ export class TradeStream extends BaseVisualization {
     this.scene.add(mesh);
     this.scene.add(glow);
 
+    // Add to interactive objects for tooltips
+    this.interactiveObjects.push({
+      mesh,
+      data: {
+        program,
+        token,
+        volume,
+        signature,
+        slot,
+      },
+    });
+
     // All particles move at same speed to stay aligned with block dividers
     this.tradeParticles.push({
       mesh,
@@ -122,6 +136,12 @@ export class TradeStream extends BaseVisualization {
       (old.mesh.material as THREE.Material).dispose();
       old.glow.geometry.dispose();
       (old.glow.material as THREE.Material).dispose();
+
+      // Remove from interactive objects
+      const index = this.interactiveObjects.findIndex(obj => obj.mesh === old.mesh);
+      if (index !== -1) {
+        this.interactiveObjects.splice(index, 1);
+      }
     }
   }
 
@@ -189,6 +209,12 @@ export class TradeStream extends BaseVisualization {
         particle.glow.geometry.dispose();
         (particle.glow.material as THREE.Material).dispose();
         this.tradeParticles.splice(index, 1);
+
+        // Remove from interactive objects
+        const objIndex = this.interactiveObjects.findIndex(obj => obj.mesh === particle.mesh);
+        if (objIndex !== -1) {
+          this.interactiveObjects.splice(objIndex, 1);
+        }
       }
     });
 
