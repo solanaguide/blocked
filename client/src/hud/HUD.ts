@@ -49,14 +49,16 @@ export class HUD {
       const avg = trades > 0 ? volume / trades : 0;
       avgElem.textContent = `$${this.formatNumber(avg)}`;
     }
+  }
 
-    // Add to history
+  updateWindowStats(trades: number, volume: number) {
+    // Add to history for charts (rolling 60s window)
     const now = Date.now();
     this.volumeHistory.push({ time: now, volume });
     this.tpsHistory.push({ time: now, tps: trades });
 
-    // Trim history
-    const cutoff = now - 60000; // 60 seconds
+    // Trim history to 60 seconds
+    const cutoff = now - 60000;
     this.volumeHistory = this.volumeHistory.filter(d => d.time > cutoff);
     this.tpsHistory = this.tpsHistory.filter(d => d.time > cutoff);
 
@@ -157,16 +159,18 @@ export class HUD {
 
     if (this.volumeHistory.length === 0) return;
 
-    const width = 280;
-    const height = 100;
-    const margin = { top: 5, right: 5, bottom: 5, left: 5 };
+    const width = 420;
+    const height = 110;
+    const margin = { top: 5, right: 40, bottom: 15, left: 5 };
+
+    const maxVolume = d3.max(this.volumeHistory, d => d.volume) || 1;
 
     const x = d3.scaleTime()
       .domain(d3.extent(this.volumeHistory, d => d.time) as [number, number])
       .range([margin.left, width - margin.right]);
 
     const y = d3.scaleLinear()
-      .domain([0, d3.max(this.volumeHistory, d => d.volume) || 1])
+      .domain([0, maxVolume])
       .range([height - margin.bottom, margin.top]);
 
     const line = d3.line<{ time: number; volume: number }>()
@@ -193,6 +197,14 @@ export class HUD {
       .attr('stroke', '#8b5cf6')
       .attr('stroke-width', 2)
       .attr('d', line);
+
+    // Add max value label
+    svg.append('text')
+      .attr('x', width - margin.right + 5)
+      .attr('y', margin.top + 10)
+      .attr('fill', '#8b5cf6')
+      .attr('font-size', '10px')
+      .text(`$${this.formatNumber(maxVolume)}`);
   }
 
   private updateTPSChart() {
@@ -201,16 +213,18 @@ export class HUD {
 
     if (this.tpsHistory.length === 0) return;
 
-    const width = 280;
-    const height = 100;
-    const margin = { top: 5, right: 5, bottom: 5, left: 5 };
+    const width = 420;
+    const height = 110;
+    const margin = { top: 5, right: 40, bottom: 15, left: 5 };
+
+    const maxTPS = d3.max(this.tpsHistory, d => d.tps) || 1;
 
     const x = d3.scaleTime()
       .domain(d3.extent(this.tpsHistory, d => d.time) as [number, number])
       .range([margin.left, width - margin.right]);
 
     const y = d3.scaleLinear()
-      .domain([0, d3.max(this.tpsHistory, d => d.tps) || 1])
+      .domain([0, maxTPS])
       .range([height - margin.bottom, margin.top]);
 
     const line = d3.line<{ time: number; tps: number }>()
@@ -237,6 +251,14 @@ export class HUD {
       .attr('stroke', '#06ffa5')
       .attr('stroke-width', 2)
       .attr('d', line);
+
+    // Add max value label
+    svg.append('text')
+      .attr('x', width - margin.right + 5)
+      .attr('y', margin.top + 10)
+      .attr('fill', '#06ffa5')
+      .attr('font-size', '10px')
+      .text(maxTPS.toFixed(0));
   }
 
   showNotification(message: string, duration = 3000) {

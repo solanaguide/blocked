@@ -81,40 +81,29 @@ export class BlockBuilder {
 
     console.log(`🌊 Block ${blockMesh.blockData.slot} sweeping with ${blockMesh.lockedParticles.size} locked particles (will force-lock remaining)`);
 
-    // Create shockwave effect when block completes
-    this.createShockwave();
+    // Flash the block edges brighter when it completes
+    this.flashBlockCompletion(blockMesh);
   }
 
-  private createShockwave() {
-    const geometry = new THREE.RingGeometry(0.1, 0.5, 32);
-    const material = new THREE.MeshBasicMaterial({
-      color: 0x8b5cf6,
-      transparent: true,
-      opacity: 1.0,
-      side: THREE.DoubleSide,
-    });
+  private flashBlockCompletion(blockMesh: BlockMesh) {
+    // Brighten the wireframe edges momentarily
+    const wireframeMat = blockMesh.wireframe.material as THREE.LineBasicMaterial;
+    const originalOpacity = wireframeMat.opacity;
 
-    const shockwave = new THREE.Mesh(geometry, material);
-    shockwave.rotation.x = Math.PI / 2;
-    this.scene.add(shockwave);
+    wireframeMat.opacity = 1.0;
+    wireframeMat.color.setHex(0x00ffff); // Bright cyan flash
 
-    // Remove after animation
-    setTimeout(() => {
-      this.scene.remove(shockwave);
-      geometry.dispose();
-      material.dispose();
-    }, 500);
-
-    // Animate shockwave
+    // Fade back to normal over 200ms
     const startTime = Date.now();
     const animate = () => {
       const elapsed = Date.now() - startTime;
-      const progress = elapsed / 500;
+      const progress = Math.min(elapsed / 200, 1);
 
       if (progress < 1) {
-        shockwave.scale.set(1 + progress * 30, 1 + progress * 30, 1);
-        (shockwave.material as THREE.MeshBasicMaterial).opacity = 1 - progress;
+        wireframeMat.opacity = 1.0 - (progress * (1.0 - originalOpacity));
         requestAnimationFrame(animate);
+      } else {
+        wireframeMat.opacity = originalOpacity;
       }
     };
     animate();

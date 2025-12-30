@@ -33,10 +33,10 @@ export class Environment {
     light3.position.set(0, 50, -50);
     this.scene.add(light3);
 
-    // Point light at center (glow effect)
-    const centerLight = new THREE.PointLight(0x8b5cf6, 2, 100);
-    centerLight.position.set(0, 0, 0);
-    this.scene.add(centerLight);
+    // Point light at center (glow effect) - removed, was causing white dot artifact
+    // const centerLight = new THREE.PointLight(0x8b5cf6, 2, 100);
+    // centerLight.position.set(0, 0, 0);
+    // this.scene.add(centerLight);
   }
 
   private setupGrid() {

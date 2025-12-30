@@ -34,12 +34,23 @@ export class MessageProcessor {
   private tradeBuffer: TradeMessage[] = [];
   private currentSlot: number = 0;
   private slotStartTime: number = Date.now();
-  private stats = {
+
+  // Current block stats (reset on each slot change)
+  private blockStats = {
     trades: 0,
     volume: 0,
     tokens: new Set<string>(),
     programs: {} as Record<string, number>,
   };
+
+  // Rolling window stats (last 60 seconds)
+  private windowStats: Array<{
+    timestamp: number;
+    trades: number;
+    volume: number;
+    programs: Record<string, number>;
+  }> = [];
+  private windowDuration = 60000; // 60 seconds
 
   processRawTrade(raw: RawTrade): TradeMessage {
     // Calculate volume in USD (token_a amount * price_usd, accounting for decimals and 1e12 precision)
@@ -65,12 +76,12 @@ export class MessageProcessor {
       trade.pp = this.shortenProgramId(raw.parent_program_id);
     }
 
-    // Update stats
-    this.stats.trades++;
-    this.stats.volume += volumeUsd;
-    this.stats.tokens.add(raw.token_a.id);
-    this.stats.tokens.add(raw.token_b.id);
-    this.stats.programs[programShort] = (this.stats.programs[programShort] || 0) + 1;
+    // Update current block stats
+    this.blockStats.trades++;
+    this.blockStats.volume += volumeUsd;
+    this.blockStats.tokens.add(raw.token_a.id);
+    this.blockStats.tokens.add(raw.token_b.id);
+    this.blockStats.programs[programShort] = (this.blockStats.programs[programShort] || 0) + 1;
 
     // Check for slot change
     if (raw.slot !== this.currentSlot && this.currentSlot !== 0) {
@@ -108,14 +119,26 @@ export class MessageProcessor {
         blockComplete = {
           type: 'block_complete',
           slot: this.currentSlot,
-          trades: this.stats.trades,
-          volume: this.stats.volume,
+          trades: this.blockStats.trades,
+          volume: this.blockStats.volume,
           timestamp: Date.now(),
         };
 
-        // Reset stats for new block
+        // Add current block stats to rolling window
+        this.windowStats.push({
+          timestamp: Date.now(),
+          trades: this.blockStats.trades,
+          volume: this.blockStats.volume,
+          programs: { ...this.blockStats.programs },
+        });
+
+        // Trim window to last 60 seconds
+        const cutoff = Date.now() - this.windowDuration;
+        this.windowStats = this.windowStats.filter(s => s.timestamp > cutoff);
+
+        // Reset block stats for new block
         this.slotStartTime = Date.now();
-        this.stats = {
+        this.blockStats = {
           trades: 0,
           volume: 0,
           tokens: new Set(),
@@ -128,15 +151,29 @@ export class MessageProcessor {
   }
 
   getStats(): StatsMessage {
+    // Aggregate stats from rolling window (last 60 seconds) PLUS current block
+    let totalTrades = this.blockStats.trades; // Start with current block
+    let totalVolume = this.blockStats.volume;
+    const aggregatedPrograms: Record<string, number> = { ...this.blockStats.programs };
+
+    // Add completed blocks from window
+    for (const stat of this.windowStats) {
+      totalTrades += stat.trades;
+      totalVolume += stat.volume;
+      for (const [program, count] of Object.entries(stat.programs)) {
+        aggregatedPrograms[program] = (aggregatedPrograms[program] || 0) + count;
+      }
+    }
+
     return {
       type: 'stats',
       slot: this.currentSlot,
       blockProgress: Math.min((Date.now() - this.slotStartTime) % 350 / 350, 1),
       window: {
-        trades: this.stats.trades,
-        volume: this.stats.volume,
-        tokens: this.stats.tokens,
-        programs: { ...this.stats.programs },
+        trades: totalTrades,
+        volume: totalVolume,
+        tokens: this.blockStats.tokens, // Current block tokens
+        programs: aggregatedPrograms,
       },
     };
   }

@@ -174,7 +174,7 @@ export class ParticleSystem {
     particle.rotation.set(0, 0, 0);
     particle.rotationSpeed.set(0, 0, 0);
     particle.lifetime = 0;
-    particle.maxLifetime = 1000; // 1000ms - increased to allow particles time to fall
+    particle.maxLifetime = 5000; // 5000ms - plenty of time for particles to fall and sweep offscreen
     particle.trade = trade;
     particle.locked = false;
     particle.lockedPosition.set(0, 0, 0);
@@ -305,9 +305,9 @@ export class ParticleSystem {
       if (!particle.locked) {
         particle.lifetime += deltaTime;
 
-        // Orphan cleanup: Remove unlocked particles after 1000ms (increased to allow time to fall)
-        if (particle.lifetime > 1000) {
-          if (Math.random() < 0.05) console.log(`♻️ Removing orphan particle ${particle.id.slice(0,6)} from slot ${particle.slot} (1000ms timeout)`);
+        // Orphan cleanup: Remove unlocked particles after 5000ms (plenty of time to fall and sweep)
+        if (particle.lifetime > 5000) {
+          if (Math.random() < 0.05) console.log(`♻️ Removing orphan particle ${particle.id.slice(0,6)} from slot ${particle.slot} (5000ms timeout)`);
           this.deleteParticle(particle.id);
           continue;
         }

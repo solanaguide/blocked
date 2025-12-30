@@ -19,6 +19,8 @@ let currentMode: FocusMode = 'volume';
 let currentShape: ParticleShape = 'cube';
 let tradesThisSecond = 0;
 let lastTpsUpdate = Date.now();
+let currentBlockTrades = 0;
+let currentBlockVolume = 0;
 
 // Handle worker messages
 worker.onmessage = (event) => {
@@ -48,6 +50,16 @@ function handleWSMessage(message: WSMessage) {
       scene.addTrade(trade);
       tradesThisSecond++;
 
+      // Track current block stats
+      if (trade.s === currentSlot) {
+        currentBlockTrades++;
+        currentBlockVolume += trade.vu;
+      } else {
+        // New slot - reset
+        currentBlockTrades = 1;
+        currentBlockVolume = trade.vu;
+      }
+
       // Show notification for mega trades
       if (trade.vu > 1000000) {
         hud.showNotification(
@@ -62,6 +74,9 @@ function handleWSMessage(message: WSMessage) {
     hud.updateCurrentSlot(currentSlot);
     hud.updateBlockProgress(batch.blockProgress);
 
+    // Update current block stats in left panel
+    hud.updateBlockStats(currentBlockTrades, currentBlockVolume);
+
     // Update TPS every second
     const now = Date.now();
     if (now - lastTpsUpdate > 1000) {
@@ -75,8 +90,6 @@ function handleWSMessage(message: WSMessage) {
     const block = message as BlockCompleteMessage;
     console.log(`Block ${block.slot} complete: ${block.trades} trades, $${block.volume.toFixed(2)}`);
 
-    hud.updateBlockStats(block.trades, block.volume);
-
     hud.showNotification(
       `Block ${block.slot} | ${block.trades} trades | $${formatNumber(block.volume)}`,
       2000
@@ -86,11 +99,20 @@ function handleWSMessage(message: WSMessage) {
   if (message.type === 'stats') {
     const stats = message as StatsMessage;
 
-    // Update program leaderboard
+    console.log('📊 Stats received:', {
+      trades: stats.window.trades,
+      volume: stats.window.volume,
+      programs: stats.window.programs
+    });
+
+    // Update program leaderboard (rolling 60s window)
     hud.updateProgramStats(stats.window.programs);
 
-    // Update token stats (would need to track in server)
-    // For now, just show placeholder
+    // Update window stats for charts (rolling 60s window)
+    hud.updateWindowStats(stats.window.trades, stats.window.volume);
+
+    // Note: Token volumes not tracked by server yet, would need to add token volume tracking
+    // For now, programs leaderboard will work
   }
 }
 
