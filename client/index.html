@@ -323,7 +323,7 @@
 
     <!-- Left Panel -->
     <div class="left-panel">
-      <div class="panel-title">Current Block</div>
+      <div class="panel-title">Last Complete Block</div>
       <div class="stat-row">
         <span class="label">Slot</span>
         <span class="value" id="block-slot">-</span>
@@ -351,11 +351,11 @@
     <!-- Right Panel -->
     <div class="right-panel">
       <div class="leaderboard">
-        <div class="panel-title">Top Programs (by volume)</div>
+        <div class="panel-title" id="programs-title">Top Programs (60s window)</div>
         <div id="programs-leaderboard"></div>
       </div>
       <div class="leaderboard">
-        <div class="panel-title">Top Tokens (by volume)</div>
+        <div class="panel-title" id="tokens-title">Top Tokens (60s window)</div>
         <div id="tokens-leaderboard"></div>
       </div>
     </div>
@@ -379,7 +379,7 @@
     <div class="controls">
       <div><kbd>1-5</kbd> Particle Shape</div>
       <div><kbd>F</kbd> Free Mode <kbd>P</kbd> Program <kbd>T</kbd> Token <kbd>V</kbd> Volume</div>
-      <div><kbd>+/-</kbd> Particle Size</div>
+      <div><kbd>+/-</kbd> Particle Size <kbd>L</kbd> Leaderboard Mode</div>
     </div>
   </div>
 

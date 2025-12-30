@@ -18,11 +18,19 @@ export interface StatsMessage {
   slot: number;
   blockProgress: number;  // 0-1, how far through current block
   window: {
+    trades: number;  // Total trades in 60s window (for charts)
+    volume: number;  // Total volume in 60s window (for charts)
+    tokens: Set<string>;
+    programs: Record<string, number>;  // Last block only (for leaderboard)
+    tokenVolumes: Record<string, number>;  // Last block only (for leaderboard)
+    topTrade?: TradeMessage;
+  };
+  lastBlock: {
+    slot: number;
     trades: number;
     volume: number;
-    tokens: Set<string>;
     programs: Record<string, number>;
-    topTrade?: TradeMessage;
+    tokenVolumes: Record<string, number>;
   };
 }
 

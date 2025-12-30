@@ -41,6 +41,7 @@ export class MessageProcessor {
     volume: 0,
     tokens: new Set<string>(),
     programs: {} as Record<string, number>,
+    tokenVolumes: {} as Record<string, number>,
   };
 
   // Rolling window stats (last 60 seconds)
@@ -49,8 +50,18 @@ export class MessageProcessor {
     trades: number;
     volume: number;
     programs: Record<string, number>;
+    tokenVolumes: Record<string, number>;
   }> = [];
   private windowDuration = 60000; // 60 seconds
+
+  // Last completed block stats (for leaderboards)
+  private lastBlockStats = {
+    slot: 0,
+    trades: 0,
+    volume: 0,
+    programs: {} as Record<string, number>,
+    tokenVolumes: {} as Record<string, number>,
+  };
 
   processRawTrade(raw: RawTrade): TradeMessage {
     // Calculate volume in USD (token_a amount * price_usd, accounting for decimals and 1e12 precision)
@@ -83,11 +94,14 @@ export class MessageProcessor {
     this.blockStats.tokens.add(raw.token_b.id);
     this.blockStats.programs[programShort] = (this.blockStats.programs[programShort] || 0) + 1;
 
-    // Check for slot change
-    if (raw.slot !== this.currentSlot && this.currentSlot !== 0) {
-      // New block detected - will be handled by getBatch
-    }
-    this.currentSlot = raw.slot;
+    // Track token volumes (use shortened mint names)
+    const tokenA = this.shortenMint(raw.token_a.id);
+    const tokenB = this.shortenMint(raw.token_b.id);
+    this.blockStats.tokenVolumes[tokenA] = (this.blockStats.tokenVolumes[tokenA] || 0) + volumeUsd;
+    this.blockStats.tokenVolumes[tokenB] = (this.blockStats.tokenVolumes[tokenB] || 0) + volumeUsd;
+
+    // NOTE: Don't update currentSlot here! It's updated in getBatch() when block completes
+    // This allows getBatch() to detect slot changes properly
 
     return trade;
   }
@@ -116,6 +130,10 @@ export class MessageProcessor {
     if (batch.length > 0) {
       const newSlot = batch[batch.length - 1].s;
       if (newSlot !== this.currentSlot && this.currentSlot !== 0) {
+        console.log(`🎯 Block ${this.currentSlot} complete! Trades: ${this.blockStats.trades}, Volume: ${this.blockStats.volume.toFixed(2)}`);
+        console.log(`   Programs:`, Object.keys(this.blockStats.programs).length, this.blockStats.programs);
+        console.log(`   Tokens:`, Object.keys(this.blockStats.tokenVolumes).length);
+
         blockComplete = {
           type: 'block_complete',
           slot: this.currentSlot,
@@ -124,12 +142,22 @@ export class MessageProcessor {
           timestamp: Date.now(),
         };
 
+        // Save as last completed block (for leaderboards)
+        this.lastBlockStats = {
+          slot: this.currentSlot,
+          trades: this.blockStats.trades,
+          volume: this.blockStats.volume,
+          programs: { ...this.blockStats.programs },
+          tokenVolumes: { ...this.blockStats.tokenVolumes },
+        };
+
         // Add current block stats to rolling window
         this.windowStats.push({
           timestamp: Date.now(),
           trades: this.blockStats.trades,
           volume: this.blockStats.volume,
           programs: { ...this.blockStats.programs },
+          tokenVolumes: { ...this.blockStats.tokenVolumes },
         });
 
         // Trim window to last 60 seconds
@@ -143,7 +171,15 @@ export class MessageProcessor {
           volume: 0,
           tokens: new Set(),
           programs: {},
+          tokenVolumes: {},
         };
+
+        // NOW update currentSlot to the new slot
+        this.currentSlot = newSlot;
+      } else if (this.currentSlot === 0 && batch.length > 0) {
+        // Initialize currentSlot on first batch
+        this.currentSlot = newSlot;
+        console.log(`🚀 Initialized currentSlot to ${this.currentSlot}`);
       }
     }
 
@@ -152,9 +188,10 @@ export class MessageProcessor {
 
   getStats(): StatsMessage {
     // Aggregate stats from rolling window (last 60 seconds) PLUS current block
-    let totalTrades = this.blockStats.trades; // Start with current block
+    let totalTrades = this.blockStats.trades; // Include current block
     let totalVolume = this.blockStats.volume;
     const aggregatedPrograms: Record<string, number> = { ...this.blockStats.programs };
+    const aggregatedTokenVolumes: Record<string, number> = { ...this.blockStats.tokenVolumes };
 
     // Add completed blocks from window
     for (const stat of this.windowStats) {
@@ -162,6 +199,9 @@ export class MessageProcessor {
       totalVolume += stat.volume;
       for (const [program, count] of Object.entries(stat.programs)) {
         aggregatedPrograms[program] = (aggregatedPrograms[program] || 0) + count;
+      }
+      for (const [token, volume] of Object.entries(stat.tokenVolumes)) {
+        aggregatedTokenVolumes[token] = (aggregatedTokenVolumes[token] || 0) + volume;
       }
     }
 
@@ -172,8 +212,16 @@ export class MessageProcessor {
       window: {
         trades: totalTrades,
         volume: totalVolume,
-        tokens: this.blockStats.tokens, // Current block tokens
+        tokens: this.blockStats.tokens,
         programs: aggregatedPrograms,
+        tokenVolumes: aggregatedTokenVolumes,
+      },
+      lastBlock: {
+        slot: this.lastBlockStats.slot,
+        trades: this.lastBlockStats.trades,
+        volume: this.lastBlockStats.volume,
+        programs: this.lastBlockStats.programs,
+        tokenVolumes: this.lastBlockStats.tokenVolumes,
       },
     };
   }

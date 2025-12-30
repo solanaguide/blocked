@@ -18,9 +18,9 @@ let currentSlot = 0;
 let currentMode: FocusMode = 'volume';
 let currentShape: ParticleShape = 'cube';
 let tradesThisSecond = 0;
+let volumeThisSecond = 0;
 let lastTpsUpdate = Date.now();
-let currentBlockTrades = 0;
-let currentBlockVolume = 0;
+let leaderboardMode: 'window' | 'block' = 'window'; // Toggle between 60s window and last block
 
 // Handle worker messages
 worker.onmessage = (event) => {
@@ -49,16 +49,7 @@ function handleWSMessage(message: WSMessage) {
     for (const trade of batch.batch) {
       scene.addTrade(trade);
       tradesThisSecond++;
-
-      // Track current block stats
-      if (trade.s === currentSlot) {
-        currentBlockTrades++;
-        currentBlockVolume += trade.vu;
-      } else {
-        // New slot - reset
-        currentBlockTrades = 1;
-        currentBlockVolume = trade.vu;
-      }
+      volumeThisSecond += trade.vu;
 
       // Show notification for mega trades
       if (trade.vu > 1000000) {
@@ -74,21 +65,23 @@ function handleWSMessage(message: WSMessage) {
     hud.updateCurrentSlot(currentSlot);
     hud.updateBlockProgress(batch.blockProgress);
 
-    // Update current block stats in left panel
-    hud.updateBlockStats(currentBlockTrades, currentBlockVolume);
-
-    // Update TPS every second
+    // Update TPS and charts every second
     const now = Date.now();
     if (now - lastTpsUpdate > 1000) {
       hud.updateTPS(tradesThisSecond);
+
+      // Add per-second data point to charts
+      hud.addChartDataPoint(tradesThisSecond, volumeThisSecond);
+
       tradesThisSecond = 0;
+      volumeThisSecond = 0;
       lastTpsUpdate = now;
     }
   }
 
   if (message.type === 'block_complete') {
     const block = message as BlockCompleteMessage;
-    console.log(`Block ${block.slot} complete: ${block.trades} trades, $${block.volume.toFixed(2)}`);
+    console.log(`✅ Block ${block.slot} complete: ${block.trades} trades, $${block.volume.toFixed(2)}`);
 
     hud.showNotification(
       `Block ${block.slot} | ${block.trades} trades | $${formatNumber(block.volume)}`,
@@ -100,19 +93,53 @@ function handleWSMessage(message: WSMessage) {
     const stats = message as StatsMessage;
 
     console.log('📊 Stats received:', {
-      trades: stats.window.trades,
-      volume: stats.window.volume,
-      programs: stats.window.programs
+      windowTrades: stats.window.trades,
+      windowVolume: stats.window.volume,
+      windowPrograms: Object.keys(stats.window.programs).length,
+      windowTokens: Object.keys(stats.window.tokenVolumes).length,
+      lastBlockSlot: stats.lastBlock.slot,
+      lastBlockTrades: stats.lastBlock.trades,
+      lastBlockPrograms: Object.keys(stats.lastBlock.programs).length,
+      lastBlockTokens: Object.keys(stats.lastBlock.tokenVolumes).length
     });
 
-    // Update program leaderboard (rolling 60s window)
-    hud.updateProgramStats(stats.window.programs);
+    // Update last block stats in left panel
+    if (stats.lastBlock && stats.lastBlock.slot > 0) {
+      console.log(`📋 Updating block stats: slot ${stats.lastBlock.slot}, trades ${stats.lastBlock.trades}, volume ${stats.lastBlock.volume}`);
+      hud.updateBlockStats(stats.lastBlock.slot, stats.lastBlock.trades, stats.lastBlock.volume);
+    } else {
+      console.warn('⚠️ lastBlock is invalid:', stats.lastBlock);
+    }
 
-    // Update window stats for charts (rolling 60s window)
-    hud.updateWindowStats(stats.window.trades, stats.window.volume);
+    // Store both window and block data for toggling
+    (window as any).cachedWindowPrograms = stats.window.programs;
+    (window as any).cachedWindowTokens = stats.window.tokenVolumes;
+    (window as any).cachedBlockPrograms = stats.lastBlock.programs || {};
+    (window as any).cachedBlockTokens = stats.lastBlock.tokenVolumes || {};
 
-    // Note: Token volumes not tracked by server yet, would need to add token volume tracking
-    // For now, programs leaderboard will work
+    console.log('💾 Cached data:', {
+      windowPrograms: Object.keys((window as any).cachedWindowPrograms).length,
+      blockPrograms: Object.keys((window as any).cachedBlockPrograms).length
+    });
+
+    // Update leaderboards based on current mode
+    updateLeaderboards();
+  }
+}
+
+// Helper to update leaderboards based on mode
+function updateLeaderboards() {
+  const windowPrograms = (window as any).cachedWindowPrograms || {};
+  const windowTokens = (window as any).cachedWindowTokens || {};
+  const blockPrograms = (window as any).cachedBlockPrograms || {};
+  const blockTokens = (window as any).cachedBlockTokens || {};
+
+  if (leaderboardMode === 'window') {
+    hud.updateProgramStats(windowPrograms, 'Top Programs (60s window)');
+    hud.updateTokenStats(windowTokens, 'Top Tokens (60s window)');
+  } else {
+    hud.updateProgramStats(blockPrograms, 'Top Programs (last block)');
+    hud.updateTokenStats(blockTokens, 'Top Tokens (last block)');
   }
 }
 
@@ -180,6 +207,14 @@ document.addEventListener('keydown', (e) => {
     scene.adjustParticleSize(-0.2);
     hud.showNotification('Size: -', 1000);
   }
+
+  // Leaderboard mode toggle
+  if (e.key.toLowerCase() === 'l') {
+    leaderboardMode = leaderboardMode === 'window' ? 'block' : 'window';
+    const mode = leaderboardMode === 'window' ? '60s Window' : 'Last Block';
+    hud.showNotification(`Leaderboards: ${mode}`, 2000);
+    updateLeaderboards();
+  }
 });
 
 // Utility
@@ -199,3 +234,4 @@ console.log('📝 Controls:');
 console.log('  1-5: Change particle shape');
 console.log('  F: Free mode | P: Program mode | T: Token mode | V: Volume mode');
 console.log('  +/-: Adjust particle size');
+console.log('  L: Toggle leaderboards (60s window / last block)');

@@ -37,7 +37,10 @@ export class HUD {
     if (blockSlot) blockSlot.textContent = slot.toString();
   }
 
-  updateBlockStats(trades: number, volume: number) {
+  updateBlockStats(slot: number, trades: number, volume: number) {
+    const slotElem = document.getElementById('block-slot');
+    if (slotElem) slotElem.textContent = slot.toString();
+
     const tradesElem = document.getElementById('block-trades');
     if (tradesElem) tradesElem.textContent = trades.toString();
 
@@ -51,8 +54,8 @@ export class HUD {
     }
   }
 
-  updateWindowStats(trades: number, volume: number) {
-    // Add to history for charts (rolling 60s window)
+  addChartDataPoint(trades: number, volume: number) {
+    // Add per-second data point to history
     const now = Date.now();
     this.volumeHistory.push({ time: now, volume });
     this.tpsHistory.push({ time: now, tps: trades });
@@ -77,7 +80,7 @@ export class HUD {
     if (elem) elem.textContent = mode.toUpperCase();
   }
 
-  updateProgramStats(programs: Record<string, number>) {
+  updateProgramStats(programs: Record<string, number>, title?: string) {
     this.programStats.clear();
     let total = 0;
 
@@ -90,6 +93,12 @@ export class HUD {
     const sorted = Array.from(this.programStats.entries())
       .sort((a, b) => b[1] - a[1])
       .slice(0, 10);
+
+    // Update title if provided
+    if (title) {
+      const titleElem = document.getElementById('programs-title');
+      if (titleElem) titleElem.textContent = title;
+    }
 
     // Render leaderboard
     const container = document.getElementById('programs-leaderboard');
@@ -115,7 +124,7 @@ export class HUD {
     }
   }
 
-  updateTokenStats(tokens: Record<string, number>) {
+  updateTokenStats(tokens: Record<string, number>, title?: string) {
     this.tokenStats.clear();
     let total = 0;
 
@@ -128,6 +137,12 @@ export class HUD {
     const sorted = Array.from(this.tokenStats.entries())
       .sort((a, b) => b[1] - a[1])
       .slice(0, 10);
+
+    // Update title if provided
+    if (title) {
+      const titleElem = document.getElementById('tokens-title');
+      if (titleElem) titleElem.textContent = title;
+    }
 
     // Render leaderboard
     const container = document.getElementById('tokens-leaderboard');
