@@ -132,9 +132,14 @@ export class StackedBars3D extends BaseVisualization {
     const maxHeight = 20;
     const barWidth = 1.5;
     const barDepth = 2;
+    const barSpacing = 2; // Space between bars
 
-    // Position for new bar (right side)
-    const x = 30;
+    // Position for new bar (right side, or after last bar)
+    let x = 30;
+    if (this.bars.length > 0) {
+      const lastBar = this.bars[this.bars.length - 1];
+      x = lastBar.position.x + barSpacing;
+    }
 
     // Create stacked segments
     const segments: BarSegment[] = [];

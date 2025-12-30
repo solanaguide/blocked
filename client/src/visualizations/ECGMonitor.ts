@@ -1,6 +1,5 @@
 import * as THREE from 'three';
 import { BaseVisualization } from '../core/BaseVisualization';
-import { volumeHeatmap } from '../utils/colors';
 import type { TradeMessage } from '../../../shared/types';
 import type { BlockData } from '../types';
 
@@ -8,13 +7,12 @@ import type { BlockData } from '../types';
  * ECGMonitor - ECG/heartbeat style display for network activity
  *
  * CONCEPT: Medical heart monitor visualization for blockchain "pulse".
- * - WAVEFORM = real-time trading activity (like ECG heartbeat)
- * - Wave HEIGHT = trade volume (log scale)
- * - Wave COLOR = volume heatmap (blue→purple→pink→red)
+ * - Top line (GREEN) = Trade Volume (USD, log scale)
+ * - Middle line (CYAN) = Trade Count (number of trades)
+ * - Bottom line (MAGENTA) = Program Diversity (unique programs)
  * - Scrolls continuously from RIGHT to LEFT
- * - Block change = MASSIVE SPIKE (cardiac event / "block heartbeat")
- * - Flat line = no activity, spikes = high activity
- * - Shows multiple monitor lines for different metrics (trades, volume, programs)
+ * - Pulses on every websocket batch update (network heartbeat)
+ * - Shows real-time network activity like a medical monitor
  */
 export class ECGMonitor extends BaseVisualization {
   private waveformLines: Map<string, WaveformLine> = new Map();
@@ -25,7 +23,8 @@ export class ECGMonitor extends BaseVisualization {
   private updateInterval = 50; // Sample every 50ms for smooth ECG
   private lastUpdateTime = 0;
   private gridLines: THREE.Line[] = [];
-  private blockPulse = 0;
+  private batchPulse = 0;
+  private labels: THREE.Sprite[] = [];
 
   constructor() {
     super();
@@ -36,10 +35,10 @@ export class ECGMonitor extends BaseVisualization {
     // Create ECG monitor grid
     this.createMonitorGrid();
 
-    // Initialize waveform lines
-    this.createWaveformLine('volume', 5, 0x00ff00);    // Top: Volume (green)
-    this.createWaveformLine('trades', 0, 0x00ddff);    // Middle: Trade count (cyan)
-    this.createWaveformLine('programs', -5, 0xff00ff); // Bottom: Program diversity (magenta)
+    // Initialize waveform lines with labels
+    this.createWaveformLine('volume', 5, 0x00ff00, 'VOLUME (USD)');
+    this.createWaveformLine('trades', 0, 0x00ddff, 'TRADES (COUNT)');
+    this.createWaveformLine('programs', -5, 0xff00ff, 'PROGRAMS (UNIQUE)');
 
     // Ambient light
     const ambientLight = new THREE.AmbientLight(0x004400, 0.3);
@@ -81,28 +80,35 @@ export class ECGMonitor extends BaseVisualization {
       this.scene.add(line);
       this.gridLines.push(line);
     }
-
-    // Add center line labels
-    this.createLabel('VOLUME', 0, 8, 0x00ff00);
-    this.createLabel('TRADES', 0, 3, 0x00ddff);
-    this.createLabel('PROGRAMS', 0, -2, 0xff00ff);
   }
 
-  private createLabel(text: string, x: number, y: number, color: number): void {
-    // Simple label using a small plane (text rendering in Three.js is complex,
-    // so we just use colored markers)
-    const geometry = new THREE.PlaneGeometry(0.5, 0.5);
-    const material = new THREE.MeshBasicMaterial({
-      color,
+  private createTextLabel(text: string, color: number): THREE.Sprite {
+    // Create canvas for text
+    const canvas = document.createElement('canvas');
+    const context = canvas.getContext('2d')!;
+    canvas.width = 512;
+    canvas.height = 128;
+
+    // Draw text
+    context.fillStyle = `#${color.toString(16).padStart(6, '0')}`;
+    context.font = 'Bold 48px monospace';
+    context.textAlign = 'left';
+    context.textBaseline = 'middle';
+    context.fillText(text, 10, 64);
+
+    // Create texture and sprite
+    const texture = new THREE.CanvasTexture(canvas);
+    const material = new THREE.SpriteMaterial({
+      map: texture,
       transparent: true,
-      opacity: 0.5,
     });
-    const marker = new THREE.Mesh(geometry, material);
-    marker.position.set(x - 30, y, 0);
-    this.scene.add(marker);
+    const sprite = new THREE.Sprite(material);
+    sprite.scale.set(12, 3, 1);
+
+    return sprite;
   }
 
-  private createWaveformLine(id: string, yOffset: number, color: number): void {
+  private createWaveformLine(id: string, yOffset: number, color: number, label: string): void {
     const points: number[] = [];
     for (let i = 0; i < this.maxPoints; i++) {
       points.push(yOffset); // Initialize at baseline
@@ -128,6 +134,12 @@ export class ECGMonitor extends BaseVisualization {
     const line = new THREE.Line(geometry, material);
     this.scene.add(line);
 
+    // Add text label on left side
+    const textLabel = this.createTextLabel(label, color);
+    textLabel.position.set(-28, yOffset, 1);
+    this.scene.add(textLabel);
+    this.labels.push(textLabel);
+
     this.waveformLines.set(id, {
       line,
       points,
@@ -144,13 +156,17 @@ export class ECGMonitor extends BaseVisualization {
     this.currentVolume += trade.vu;
     this.currentTrades++;
     this.currentPrograms.add(trade.p);
+
+    // Pulse on every batch (this gets called for each trade in batch)
+    // Small pulse for individual trades
+    this.batchPulse = Math.max(this.batchPulse, 0.5);
   }
 
   onBlockComplete(blockData: BlockData, oldSlot: number, newSlot: number): void {
     console.log(`💓 Block ${newSlot} complete - ${blockData.trades} trades`);
 
-    // MASSIVE SPIKE for block completion (cardiac event)
-    this.blockPulse = 12.0; // Large spike
+    // Larger pulse for block completion
+    this.batchPulse = Math.max(this.batchPulse, 2.0);
 
     // Flash the grid
     this.gridLines.forEach(line => {
@@ -167,15 +183,15 @@ export class ECGMonitor extends BaseVisualization {
       this.updateWaveforms();
       this.lastUpdateTime = time;
 
-      // Reset accumulators
+      // Reset accumulators after sampling
       this.currentVolume = 0;
       this.currentTrades = 0;
       this.currentPrograms.clear();
     }
 
-    // Decay block pulse
-    if (this.blockPulse > 0) {
-      this.blockPulse *= 0.9;
+    // Decay batch pulse
+    if (this.batchPulse > 0) {
+      this.batchPulse *= 0.92;
     }
 
     // Decay grid flash
@@ -184,7 +200,7 @@ export class ECGMonitor extends BaseVisualization {
       if (material.opacity > 0.3) {
         material.opacity *= 0.98;
       }
-      // Fade back to green
+      // Fade back to dark green
       const currentColor = material.color.getHex();
       if (currentColor !== 0x003300) {
         material.color.lerp(new THREE.Color(0x003300), 0.05);
@@ -196,19 +212,19 @@ export class ECGMonitor extends BaseVisualization {
     // Update volume waveform
     const volumeLine = this.waveformLines.get('volume')!;
     const volumeAmplitude = Math.min(5, Math.log10(Math.max(1, this.currentVolume)) * 0.5);
-    const volumeValue = volumeLine.yOffset + volumeAmplitude + this.blockPulse;
+    const volumeValue = volumeLine.yOffset + volumeAmplitude + this.batchPulse;
     this.updateWaveform(volumeLine, volumeValue);
 
     // Update trades waveform
     const tradesLine = this.waveformLines.get('trades')!;
     const tradesAmplitude = Math.min(4, this.currentTrades * 0.05);
-    const tradesValue = tradesLine.yOffset + tradesAmplitude + this.blockPulse * 0.8;
+    const tradesValue = tradesLine.yOffset + tradesAmplitude + this.batchPulse * 0.8;
     this.updateWaveform(tradesLine, tradesValue);
 
     // Update programs waveform
     const programsLine = this.waveformLines.get('programs')!;
     const programsAmplitude = Math.min(3, this.currentPrograms.size * 0.15);
-    const programsValue = programsLine.yOffset + programsAmplitude + this.blockPulse * 0.6;
+    const programsValue = programsLine.yOffset + programsAmplitude + this.batchPulse * 0.6;
     this.updateWaveform(programsLine, programsValue);
   }
 
@@ -232,7 +248,7 @@ export class ECGMonitor extends BaseVisualization {
 
     // Update color based on intensity
     const intensity = Math.abs(value - waveform.yOffset);
-    const heatColor = intensity > 5 ? 0xff0000 : intensity > 3 ? 0xff00ff : waveform.baseColor;
+    const heatColor = intensity > 5 ? 0xff0000 : intensity > 3 ? 0xffff00 : waveform.baseColor;
     (waveform.line.material as THREE.LineBasicMaterial).color.setHex(heatColor);
   }
 
@@ -243,6 +259,13 @@ export class ECGMonitor extends BaseVisualization {
       (waveform.line.material as THREE.Material).dispose();
     });
     this.waveformLines.clear();
+
+    this.labels.forEach(label => {
+      this.scene.remove(label);
+      if (label.material.map) label.material.map.dispose();
+      label.material.dispose();
+    });
+    this.labels = [];
 
     this.gridLines.forEach(line => {
       this.scene.remove(line);

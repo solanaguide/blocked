@@ -5,27 +5,28 @@ import type { TradeMessage } from '../../../shared/types';
 import type { BlockData } from '../types';
 
 /**
- * NyanTrade - Nyan Cat style with rainbow token area chart tail
+ * NyanTrade - Nyan Cat style with continuous rainbow token stream tail
  *
  * CONCEPT: Animated "trade cat" flying through space leaving rainbow trail.
  * - "Cat" = glowing cube representing current trade activity
- * - RAINBOW TAIL = stacked area chart of top tokens over time
- * - Each color band = a different token's volume
- * - Tail scrolls from RIGHT to LEFT (like Nyan Cat)
+ * - RAINBOW TAIL = continuous flowing ribbon showing token distribution
+ * - Each colored layer = a different token's volume proportion
+ * - Tail flows smoothly behind cat (like Nyan Cat)
  * - Block change = CAT BOOST with sparkle effects
- * - More trading volume = longer, more colorful tail
+ * - More trading volume = more colorful tail
  */
 export class NyanTrade extends BaseVisualization {
   private cat: THREE.Mesh;
   private catGlow: THREE.PointLight;
-  private tailSegments: TailSegment[] = [];
-  private maxTailLength = 80;
-  private tokenHistory: Map<string, number[]> = new Map();
-  private updateInterval = 200; // Sample every 200ms
-  private lastUpdateTime = 0;
+  private tailRibbon: THREE.Mesh | null = null;
+  private tailGeometry: THREE.PlaneGeometry | null = null;
+  private tailSegments = 100; // Number of segments in the ribbon
+  private tailWidth = 8;
   private catBounce = 0;
   private sparkles: THREE.Points[] = [];
   private pulseIntensity = 0;
+  private lastTailUpdateTime = 0;
+  private tailUpdateInterval = 100; // Update tail every 100ms
 
   constructor() {
     super();
@@ -51,6 +52,9 @@ export class NyanTrade extends BaseVisualization {
     this.catGlow = new THREE.PointLight(0xff006e, 3, 30);
     this.catGlow.position.copy(this.cat.position);
     this.scene.add(this.catGlow);
+
+    // Create initial rainbow tail ribbon
+    this.createTailRibbon();
 
     // Ambient light
     const ambientLight = new THREE.AmbientLight(0xffffff, 0.3);
@@ -84,25 +88,104 @@ export class NyanTrade extends BaseVisualization {
     this.scene.add(stars);
   }
 
+  private createTailRibbon(): void {
+    // Create a ribbon mesh that extends behind the cat
+    this.tailGeometry = new THREE.PlaneGeometry(50, this.tailWidth, this.tailSegments, 10);
+
+    // Create vertex colors for rainbow effect
+    const colors = new Float32Array((this.tailSegments + 1) * 11 * 3); // segments+1 x 11 vertices per row
+    this.updateTailColors(colors);
+
+    this.tailGeometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+
+    const material = new THREE.MeshBasicMaterial({
+      vertexColors: true,
+      side: THREE.DoubleSide,
+      transparent: true,
+      opacity: 0.9,
+    });
+
+    this.tailRibbon = new THREE.Mesh(this.tailGeometry, material);
+    this.tailRibbon.position.set(-10, 0, 0); // Position behind cat
+    this.scene.add(this.tailRibbon);
+  }
+
+  private updateTailColors(colors: Float32Array): void {
+    if (!this.dataProcessor) return;
+
+    // Get top 6 tokens for rainbow layers
+    const topTokens = this.dataProcessor.getTopTokens(6);
+    const tokenVolumes = this.dataProcessor.getTokenVolumes();
+
+    if (topTokens.length === 0) {
+      // Default rainbow if no data
+      for (let i = 0; i < colors.length / 3; i++) {
+        const rainbowColors = [0xff0000, 0xff7f00, 0xffff00, 0x00ff00, 0x0000ff, 0x9400d3];
+        const colorIndex = Math.floor((i % (this.tailSegments + 1)) / (this.tailSegments + 1) * rainbowColors.length);
+        const color = new THREE.Color(rainbowColors[colorIndex]);
+        colors[i * 3] = color.r;
+        colors[i * 3 + 1] = color.g;
+        colors[i * 3 + 2] = color.b;
+      }
+      return;
+    }
+
+    // Calculate total volume
+    let totalVolume = 0;
+    topTokens.forEach(token => {
+      totalVolume += tokenVolumes.get(token) || 0;
+    });
+
+    if (totalVolume === 0) totalVolume = 1;
+
+    // Assign colors based on token volumes
+    // Each vertical band gets colors from token distribution
+    for (let i = 0; i <= this.tailSegments; i++) {
+      // Calculate which tokens are visible at this position
+      // Closer to cat = current data, further away = fades
+      const fadeAmount = i / this.tailSegments;
+
+      let currentHeight = 0;
+      const heightStep = this.tailWidth / 10; // 11 vertices vertically (0-10)
+
+      for (let j = 0; j <= 10; j++) {
+        const vertexIndex = i * 11 + j;
+        const normalizedHeight = j / 10; // 0 to 1
+
+        // Find which token this height corresponds to
+        let accumulatedRatio = 0;
+        let tokenColor = new THREE.Color(0x8b5cf6); // Default purple
+
+        for (const token of topTokens) {
+          const volume = tokenVolumes.get(token) || 0;
+          const ratio = volume / totalVolume;
+          accumulatedRatio += ratio;
+
+          if (normalizedHeight <= accumulatedRatio) {
+            const rawColor = tokenColors.get(token) || hashColor(token);
+            tokenColor = new THREE.Color(rawColor);
+            break;
+          }
+        }
+
+        // Apply fade based on distance from cat
+        const opacity = 1 - fadeAmount * 0.5;
+        tokenColor.multiplyScalar(opacity);
+
+        colors[vertexIndex * 3] = tokenColor.r;
+        colors[vertexIndex * 3 + 1] = tokenColor.g;
+        colors[vertexIndex * 3 + 2] = tokenColor.b;
+      }
+    }
+  }
+
   getName(): string {
     return 'Nyan Trade';
   }
 
   onTrade(trade: TradeMessage, slot: number): void {
-    const token = trade.ta || 'UNKNOWN';
-    const volume = trade.vu;
-
-    // Accumulate token volumes
-    if (!this.tokenHistory.has(token)) {
-      this.tokenHistory.set(token, []);
-    }
-
-    const history = this.tokenHistory.get(token)!;
-    if (history.length === 0) {
-      history.push(volume);
-    } else {
-      history[history.length - 1] += volume;
-    }
+    // Trades automatically update dataProcessor's token volumes
+    // We just need to periodically update the tail colors
   }
 
   onBlockComplete(blockData: BlockData, oldSlot: number, newSlot: number): void {
@@ -141,20 +224,16 @@ export class NyanTrade extends BaseVisualization {
   }
 
   update(deltaTime: number): void {
-    const time = this.clock.getElapsedTime() * 1000;
+    const time = this.clock.getElapsedTime();
 
-    // Sample data periodically and create tail segment
-    if (time - this.lastUpdateTime > this.updateInterval) {
-      this.createTailSegment();
-      this.lastUpdateTime = time;
-
-      // Add new entry to all token histories
-      this.tokenHistory.forEach(history => {
-        history.push(0);
-        if (history.length > this.maxTailLength) {
-          history.shift();
-        }
-      });
+    // Update tail colors periodically
+    if (time * 1000 - this.lastTailUpdateTime > this.tailUpdateInterval) {
+      if (this.tailGeometry) {
+        const colors = this.tailGeometry.attributes.color.array as Float32Array;
+        this.updateTailColors(colors);
+        this.tailGeometry.attributes.color.needsUpdate = true;
+      }
+      this.lastTailUpdateTime = time * 1000;
     }
 
     // Bounce cat up and down
@@ -162,6 +241,11 @@ export class NyanTrade extends BaseVisualization {
     const bounceY = Math.sin(this.catBounce) * 2;
     this.cat.position.y = bounceY;
     this.catGlow.position.copy(this.cat.position);
+
+    // Update tail position to follow cat
+    if (this.tailRibbon) {
+      this.tailRibbon.position.y = bounceY;
+    }
 
     // Rotate cat
     this.cat.rotation.y += deltaTime * 0.002;
@@ -176,24 +260,6 @@ export class NyanTrade extends BaseVisualization {
       this.catGlow.intensity = 3 + this.pulseIntensity * 5;
     }
 
-    // Update tail segments (scroll left)
-    this.tailSegments.forEach((segment, index) => {
-      segment.mesh.position.x -= 0.1;
-
-      // Fade out tail as it gets further from cat
-      const distanceFromCat = this.cat.position.x - segment.mesh.position.x;
-      const opacity = Math.max(0, 1 - distanceFromCat / 40);
-      (segment.mesh.material as THREE.MeshBasicMaterial).opacity = opacity;
-
-      // Remove segments that scrolled off screen
-      if (segment.mesh.position.x < -50) {
-        this.scene.remove(segment.mesh);
-        segment.mesh.geometry.dispose();
-        (segment.mesh.material as THREE.Material).dispose();
-        this.tailSegments.splice(index, 1);
-      }
-    });
-
     // Update sparkles
     this.sparkles.forEach((sparkle, index) => {
       (sparkle.material as THREE.PointsMaterial).opacity *= 0.95;
@@ -206,76 +272,27 @@ export class NyanTrade extends BaseVisualization {
         this.sparkles.splice(index, 1);
       }
     });
-  }
 
-  private createTailSegment(): void {
-    if (!this.dataProcessor) return;
-
-    // Get top 6 tokens for rainbow layers
-    const topTokens = this.dataProcessor.getTopTokens(6);
-    if (topTokens.length === 0) return;
-
-    const segmentWidth = 0.5;
-    const maxHeight = 8;
-
-    // Calculate total volume for this time slice
-    let totalVolume = 0;
-    topTokens.forEach(token => {
-      const history = this.tokenHistory.get(token);
-      if (history && history.length > 0) {
-        totalVolume += history[history.length - 1];
+    // Gentle wave motion in tail
+    if (this.tailGeometry) {
+      const positions = this.tailGeometry.attributes.position.array as Float32Array;
+      for (let i = 0; i <= this.tailSegments; i++) {
+        for (let j = 0; j <= 10; j++) {
+          const vertexIndex = (i * 11 + j) * 3;
+          const waveOffset = Math.sin(time * 2 + i * 0.1) * 0.3;
+          positions[vertexIndex + 2] = waveOffset; // Z offset for wave
+        }
       }
-    });
-
-    if (totalVolume === 0) return;
-
-    // Create stacked colored segments (area chart style)
-    let currentY = 0;
-    topTokens.forEach((token, index) => {
-      const history = this.tokenHistory.get(token);
-      if (!history || history.length === 0) return;
-
-      const volume = history[history.length - 1];
-      const volumeRatio = volume / totalVolume;
-      const layerHeight = volumeRatio * maxHeight;
-
-      if (layerHeight < 0.1) return;
-
-      const color = tokenColors.get(token) || hashColor(token);
-
-      const geometry = new THREE.PlaneGeometry(segmentWidth, layerHeight);
-      const material = new THREE.MeshBasicMaterial({
-        color,
-        side: THREE.DoubleSide,
-        transparent: true,
-        opacity: 0.8,
-      });
-
-      const mesh = new THREE.Mesh(geometry, material);
-      mesh.position.set(
-        this.cat.position.x - 2, // Start just behind cat
-        currentY + layerHeight / 2,
-        0
-      );
-
-      this.scene.add(mesh);
-
-      this.tailSegments.push({
-        mesh,
-        token,
-      });
-
-      currentY += layerHeight;
-    });
+      this.tailGeometry.attributes.position.needsUpdate = true;
+    }
   }
 
   dispose(): void {
-    this.tailSegments.forEach(segment => {
-      this.scene.remove(segment.mesh);
-      segment.mesh.geometry.dispose();
-      (segment.mesh.material as THREE.Material).dispose();
-    });
-    this.tailSegments = [];
+    if (this.tailRibbon) {
+      this.scene.remove(this.tailRibbon);
+      if (this.tailGeometry) this.tailGeometry.dispose();
+      (this.tailRibbon.material as THREE.Material).dispose();
+    }
 
     this.sparkles.forEach(sparkle => {
       this.scene.remove(sparkle);
@@ -284,13 +301,6 @@ export class NyanTrade extends BaseVisualization {
     });
     this.sparkles = [];
 
-    this.tokenHistory.clear();
-
     super.dispose();
   }
-}
-
-interface TailSegment {
-  mesh: THREE.Mesh;
-  token: string;
 }

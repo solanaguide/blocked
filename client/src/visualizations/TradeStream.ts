@@ -20,6 +20,7 @@ export class TradeStream extends BaseVisualization {
   private tradeParticles: TradeParticle[] = [];
   private dividers: BlockDivider[] = [];
   private maxParticles = 300;
+  private streamSpeed = 0.3; // Constant speed for all particles and dividers
 
   constructor() {
     super();
@@ -105,13 +106,10 @@ export class TradeStream extends BaseVisualization {
     this.scene.add(mesh);
     this.scene.add(glow);
 
-    // Speed based on volume (bigger trades fly faster)
-    const speed = 0.2 + Math.log10(Math.max(1, volume)) * 0.05;
-
+    // All particles move at same speed to stay aligned with block dividers
     this.tradeParticles.push({
       mesh,
       glow,
-      speed,
       age: 0,
     });
 
@@ -160,7 +158,6 @@ export class TradeStream extends BaseVisualization {
     this.dividers.push({
       mesh,
       slot,
-      speed: 0.4, // Divider moves across screen
       opacity: 0.8,
     });
   }
@@ -172,8 +169,8 @@ export class TradeStream extends BaseVisualization {
     this.tradeParticles.forEach((particle, index) => {
       particle.age += deltaTime;
 
-      // Move particle left to right
-      particle.mesh.position.x += particle.speed;
+      // Move particle left to right at constant speed
+      particle.mesh.position.x += this.streamSpeed;
       particle.glow.position.copy(particle.mesh.position);
 
       // Subtle bobbing motion
@@ -197,8 +194,8 @@ export class TradeStream extends BaseVisualization {
 
     // Update dividers
     this.dividers.forEach((divider, index) => {
-      // Move divider left to right
-      divider.mesh.position.x += divider.speed;
+      // Move divider left to right at same speed as particles
+      divider.mesh.position.x += this.streamSpeed;
 
       // Fade out as it moves
       divider.opacity *= 0.995;
@@ -242,13 +239,11 @@ export class TradeStream extends BaseVisualization {
 interface TradeParticle {
   mesh: THREE.Mesh;
   glow: THREE.Mesh;
-  speed: number;
   age: number;
 }
 
 interface BlockDivider {
   mesh: THREE.Mesh;
   slot: number;
-  speed: number;
   opacity: number;
 }
