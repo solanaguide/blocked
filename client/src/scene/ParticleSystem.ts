@@ -56,14 +56,31 @@ export class ParticleSystem {
   }
 
   private createMaterial() {
-    // Use MeshBasicMaterial for pure colors without lighting interference
-    this.material = new THREE.MeshBasicMaterial({
-      color: 0xffffff,    // White base - vertex colors will multiply with this
-      vertexColors: true, // Per-instance colors
-      toneMapped: false,  // Prevent color washing
-    }) as any; // Cast to MeshStandardMaterial type for compatibility
+    // Custom shader for per-instance colors on InstancedMesh
+    const vertexShader = `
+      varying vec3 vColor;
 
-    console.log('🎨 Material created:', this.material.type, 'vertexColors:', (this.material as any).vertexColors, 'color:', (this.material as any).color.getHexString());
+      void main() {
+        vColor = instanceColor; // Use instance color
+        gl_Position = projectionMatrix * modelViewMatrix * instanceMatrix * vec4(position, 1.0);
+      }
+    `;
+
+    const fragmentShader = `
+      varying vec3 vColor;
+
+      void main() {
+        gl_FragColor = vec4(vColor, 1.0);
+      }
+    `;
+
+    this.material = new THREE.ShaderMaterial({
+      vertexShader,
+      fragmentShader,
+      toneMapped: false,
+    }) as any;
+
+    console.log('🎨 ShaderMaterial created for InstancedMesh with per-instance colors');
   }
 
   private createInstancedMeshes() {
