@@ -314,32 +314,16 @@ export class ParticleSystem {
       }
 
       if (!particle.locked) {
-        // Check if this particle's block is sweeping
+        // Check if this particle's block is sweeping - if so, FORCE LOCK immediately
         if (blockBuilder.isBlockSweeping(particle.slot)) {
-          // Only force-lock if particle is INSIDE or NEAR the container
-          // Otherwise just remove it (it never made it in time)
-          const blockHalfSize = 15;
-          const isNearBlock = Math.abs(particle.position.x) < blockHalfSize * 1.5 &&
-                              Math.abs(particle.position.z) < blockHalfSize * 1.5 &&
-                              particle.position.y < 10; // Must have fallen close to block
-
-          if (isNearBlock) {
-            const forceLockResult = blockBuilder.forceLockParticle(particle.id, particle.slot, particle.position);
-            if (forceLockResult.locked && forceLockResult.gridPosition) {
-              particle.locked = true;
-              particle.lockedPosition.copy(forceLockResult.gridPosition);
-              particle.velocity.set(0, 0, 0);
-              if (Math.random() < 0.05) {
-                console.log(`⚡ Force-locked particle ${particle.id.slice(0,6)} to sweeping block ${particle.slot}`);
-              }
-            }
-          } else {
-            // Particle never made it - remove it instead of orphaning
+          const forceLockResult = blockBuilder.forceLockParticle(particle.id, particle.slot, particle.position);
+          if (forceLockResult.locked && forceLockResult.gridPosition) {
+            particle.locked = true;
+            particle.lockedPosition.copy(forceLockResult.gridPosition);
+            particle.velocity.set(0, 0, 0);
             if (Math.random() < 0.05) {
-              console.log(`🚫 Removing particle ${particle.id.slice(0,6)} - didn't make it to block ${particle.slot} in time`);
+              console.log(`⚡ Force-locked particle ${particle.id.slice(0,6)} to sweeping block ${particle.slot}`);
             }
-            this.particles.delete(particle.id);
-            continue;
           }
         } else {
           // CONTAINER APPROACH: Particles rain down, maintaining their downward velocity

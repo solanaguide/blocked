@@ -18,6 +18,8 @@ export class Scene {
 
   private currentSlot: number = 0;
   private blockStartTime: number = Date.now();
+  private slotChangeTime: number = 0;
+  private gracePeriodMs: number = 50; // Grace period after slot change before sweeping
 
   constructor(container: HTMLElement) {
     // Create scene
@@ -105,6 +107,8 @@ export class Scene {
   }
 
   addTrade(trade: TradeMessage) {
+    const now = Date.now();
+
     // FIRST TRADE EVER: Create initial block before anything else
     if (this.currentSlot === 0) {
       console.log(`🎬 First trade! Creating initial block for slot ${trade.s}`);
@@ -117,17 +121,35 @@ export class Scene {
       };
       this.blockBuilder.startBlock(blockData);
       this.currentSlot = trade.s;
+      this.slotChangeTime = now;
     }
     // Check for slot change, before spawning particle
     else if (trade.s !== this.currentSlot) {
       // New slot detected! Complete old block and start new one
-      console.log(`🔄 Slot change detected: ${this.currentSlot} → ${trade.s}`);
+      console.log(`🔄 Slot change detected: ${this.currentSlot} → ${trade.s}, starting grace period`);
       this.onBlockComplete(this.currentSlot, trade.s);
+      this.slotChangeTime = now;
       this.currentSlot = trade.s;
     }
 
-    // ALWAYS spawn particle for every trade - no skipping!
-    this.particleSystem.addTrade(trade, trade.s);
+    // Grace period logic: assign particles to old slot if within grace period
+    const timeSinceSlotChange = now - this.slotChangeTime;
+    let assignToSlot = trade.s;
+
+    if (timeSinceSlotChange < this.gracePeriodMs && trade.s === this.currentSlot) {
+      // We're in grace period and this is a new-slot trade
+      // Assign it to the OLD slot (currentSlot - 1) so it falls into the sweeping block
+      const previousSlot = this.currentSlot - 1;
+      if (this.blockBuilder.hasFormingBlockForSlot(previousSlot) || this.blockBuilder.isBlockSweeping(previousSlot)) {
+        assignToSlot = previousSlot;
+        if (Math.random() < 0.05) {
+          console.log(`⏱️ Grace period: assigning trade to old slot ${previousSlot}`);
+        }
+      }
+    }
+
+    // Spawn particle with appropriate slot assignment
+    this.particleSystem.addTrade(trade, assignToSlot);
   }
 
   onBlockComplete(oldSlot: number, newSlot: number) {
