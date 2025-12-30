@@ -154,8 +154,8 @@ export class BlockBuilder {
       console.log(`🔒 Locking particle ${particleId.slice(0,6)} (slot ${particleSlot}) to block at distance ${distance.toFixed(1)}`);
     }
 
-    // Calculate grid position (snap to grid) - LARGER cells to spread particles out
-    const cellSize = 4.0; // Larger cells = more spread
+    // Calculate grid position (snap to grid) - MUST MATCH ParticleSystem stacking cellSize!
+    const cellSize = 3.0; // Tighter stacking, matches ParticleSystem.ts
     const gridX = Math.round(particlePosition.x / cellSize) * cellSize;
     const gridY = Math.round(particlePosition.y / cellSize) * cellSize;
     const gridZ = Math.round(particlePosition.z / cellSize) * cellSize;
@@ -257,7 +257,8 @@ export class BlockBuilder {
         const checkZ = gridZ + dz * cellSize;
 
         // Search through occupied grid positions
-        for (let dy = -3; dy <= 3; dy++) { // Check vertical range
+        // Block is 30 units tall (Y: -15 to +15), with cellSize=3.0 that's -5 to +5
+        for (let dy = -5; dy <= 5; dy++) { // Full vertical range
           const checkY = dy * cellSize;
           const key = `${checkX},${checkY},${checkZ}`;
           if (block.gridPositions.has(key)) {

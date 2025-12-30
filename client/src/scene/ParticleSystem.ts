@@ -13,7 +13,6 @@ export class ParticleSystem {
   private material: THREE.MeshStandardMaterial;
 
   // Instance tracking
-  private instanceCounts: Map<ParticleShape, number> = new Map();
   private maxInstances = 10000; // Increased for high-throughput scenarios
 
   private currentShape: ParticleShape = 'cube';
@@ -107,7 +106,6 @@ export class ParticleSystem {
       mesh.count = 0; // Start with no instances
       this.scene.add(mesh);
       this.instancedMeshes.set(shape, mesh);
-      this.instanceCounts.set(shape, 0);
 
       console.log(`🎨 Created ${shape} mesh with instanceColor buffer:`, mesh.instanceColor !== null);
     }
@@ -186,11 +184,19 @@ export class ParticleSystem {
 
   private createNewParticle(slot: number): Particle {
     const mesh = this.instancedMeshes.get(this.currentShape)!;
-    let instanceId = this.instanceCounts.get(this.currentShape)!;
+
+    // SIMPLE APPROACH: Just count active particles to get next instance ID
+    // This ensures instance IDs are packed at the beginning (0, 1, 2, ...)
+    // which matches mesh.count perfectly
+    let instanceId = 0;
+    for (const p of this.particles.values()) {
+      if (p.mesh === mesh) {
+        instanceId++;
+      }
+    }
 
     if (instanceId >= this.maxInstances) {
-      // We've hit the instance limit - increase it or warn
-      console.warn(`⚠️ Hit max instances (${this.maxInstances}), particle may not render`);
+      console.warn(`⚠️ Hit max instances (${this.maxInstances})!`);
       instanceId = this.maxInstances - 1;
     }
 
@@ -213,8 +219,8 @@ export class ParticleSystem {
       lockedPosition: new THREE.Vector3(),
     };
 
-    this.instanceCounts.set(this.currentShape, instanceId + 1);
-    mesh.count = Math.min(instanceId + 1, this.maxInstances);
+    // Update mesh.count to include this new particle
+    mesh.count = instanceId + 1;
 
     return particle;
   }
@@ -222,7 +228,8 @@ export class ParticleSystem {
   private calculateSpeed(volumeUsd: number): number {
     // CONTAINER APPROACH: Fall speed (downward velocity)
     // Bigger trades fall faster (like heavier objects)
-    return 2.0 + Math.log10(Math.max(1, volumeUsd)) * 0.3;
+    // Doubled for faster particle descent
+    return 4.0 + Math.log10(Math.max(1, volumeUsd)) * 0.6;
   }
 
   private calculateSize(volumeUsd: number): number {
@@ -301,7 +308,7 @@ export class ParticleSystem {
         // Orphan cleanup: Remove unlocked particles after 1000ms (increased to allow time to fall)
         if (particle.lifetime > 1000) {
           if (Math.random() < 0.05) console.log(`♻️ Removing orphan particle ${particle.id.slice(0,6)} from slot ${particle.slot} (1000ms timeout)`);
-          this.particles.delete(particle.id);
+          this.deleteParticle(particle.id);
           continue;
         }
       }
@@ -309,7 +316,7 @@ export class ParticleSystem {
       // Safety: Remove particles that fell way below the floor
       if (particle.position.y < -50) {
         if (Math.random() < 0.01) console.log(`🗑️ Removing fallen particle from slot ${particle.slot}`);
-        this.particles.delete(particle.id);
+        this.deleteParticle(particle.id);
         continue;
       }
 
@@ -331,7 +338,7 @@ export class ParticleSystem {
 
           // Update position - particles fall with their initial velocity
           particle.position.add(
-            particle.velocity.clone().multiplyScalar(deltaTime * 0.05) // Slower fall for visibility
+            particle.velocity.clone().multiplyScalar(deltaTime * 0.1) // Doubled fall speed
           );
 
           // PHYSICS-STYLE STACKING: Check if particle should land on other particles
@@ -341,7 +348,7 @@ export class ParticleSystem {
 
           if (isInsideXZ) {
             // Get height of stack at this X/Z position
-            const cellSize = 4.0;
+            const cellSize = 3.0; // Reduced for tighter stacking that reaches block top
             const stackHeight = blockBuilder.getStackHeightAt(particle.slot, particle.position.x, particle.position.z, cellSize);
             const landingHeight = stackHeight + cellSize; // Land on top of stack
 
@@ -355,6 +362,11 @@ export class ParticleSystem {
                 particle.locked = true;
                 particle.lockedPosition.copy(lockResult.gridPosition);
                 particle.velocity.set(0, 0, 0);
+              } else {
+                // Failed to lock - log occasionally for debugging
+                if (Math.random() < 0.01) {
+                  console.warn(`⚠️ Particle ${particle.id.slice(0,6)} (slot ${particle.slot}) failed to lock at landing height`);
+                }
               }
             }
           }
@@ -377,9 +389,15 @@ export class ParticleSystem {
             if (Math.random() < 0.05) {
               console.log(`🗑️ Removing particle ${particle.id.slice(0,6)} - swept off screen at x=${particle.position.x.toFixed(1)}`);
             }
-            this.particles.delete(particle.id);
+            this.deleteParticle(particle.id);
             continue;
           }
+        } else {
+          // BUG FIX: Block doesn't exist anymore - this is an orphaned locked particle!
+          // This happens if a block was removed before cleanup triggered
+          console.warn(`⚠️ Orphan locked particle ${particle.id.slice(0,6)} for slot ${particle.slot} - block missing, removing`);
+          this.deleteParticle(particle.id);
+          continue;
         }
       }
 
@@ -428,7 +446,97 @@ export class ParticleSystem {
 
     console.log(`🗑️ Removing ${toRemove.length} particles for slot ${slot}`);
     for (const id of toRemove) {
-      this.particles.delete(id);
+      this.deleteParticle(id);
+    }
+
+    // CRITICAL: After bulk delete, recalculate mesh.count
+    if (toRemove.length > 0) {
+      this.recalculateMeshCounts();
+    }
+  }
+
+  // SIMPLE CLEANUP: Remove all particles older than a given slot
+  removeParticlesOlderThan(minSlot: number) {
+    const toRemove: string[] = [];
+    for (const [id, particle] of this.particles) {
+      if (particle.slot < minSlot) {
+        toRemove.push(id);
+      }
+    }
+
+    if (toRemove.length > 0) {
+      console.log(`🧹 Cleaning up ${toRemove.length} old particles (slots < ${minSlot})`);
+      for (const id of toRemove) {
+        this.deleteParticle(id);
+      }
+
+      // CRITICAL: After bulk delete, recalculate mesh.count for all meshes
+      this.recalculateMeshCounts();
+    }
+  }
+
+  private getShapeForMesh(mesh: THREE.InstancedMesh): ParticleShape | undefined {
+    for (const [shape, shapeMesh] of this.instancedMeshes) {
+      if (shapeMesh === mesh) {
+        return shape;
+      }
+    }
+    return undefined;
+  }
+
+  private deleteParticle(particleId: string) {
+    const particle = this.particles.get(particleId);
+    if (particle) {
+      // CRITICAL: Move instance FAR away offscreen (scaling to 0 doesn't work reliably)
+      const matrix = new THREE.Matrix4();
+      matrix.setPosition(new THREE.Vector3(10000, 10000, 10000)); // Far offscreen
+      matrix.scale(new THREE.Vector3(0.001, 0.001, 0.001)); // Tiny just in case
+      particle.mesh.setMatrixAt(particle.instanceId, matrix);
+      particle.mesh.instanceMatrix.needsUpdate = true;
+
+      // Also set color to transparent/black
+      const transparent = new THREE.Color(0x000000);
+      particle.mesh.setColorAt(particle.instanceId, transparent);
+      if (particle.mesh.instanceColor) {
+        particle.mesh.instanceColor.needsUpdate = true;
+      }
+
+      // Log occasionally to verify this is being called
+      if (Math.random() < 0.01) {
+        console.log(`🗑️ Hiding instance ${particle.instanceId} for particle ${particleId.slice(0,6)}`);
+      }
+
+      this.particles.delete(particleId);
+
+      // NOTE: mesh.count is NOT updated here - that's done in bulk via recalculateMeshCounts()
+    }
+  }
+
+  // Recalculate mesh.count for all meshes based on active particles
+  // This tells Three.js how many instances to actually render
+  private recalculateMeshCounts() {
+    // Count active particles per shape
+    const countsPerShape = new Map<ParticleShape, number>();
+    for (const shape of this.instancedMeshes.keys()) {
+      countsPerShape.set(shape, 0);
+    }
+
+    for (const particle of this.particles.values()) {
+      const shape = this.getShapeForMesh(particle.mesh);
+      if (shape) {
+        countsPerShape.set(shape, (countsPerShape.get(shape) || 0) + 1);
+      }
+    }
+
+    // Update mesh.count to match actual particle count
+    for (const [shape, mesh] of this.instancedMeshes) {
+      const oldCount = mesh.count;
+      const newCount = countsPerShape.get(shape) || 0;
+      mesh.count = newCount;
+
+      if (oldCount !== newCount) {
+        console.log(`📉 Updated ${shape} mesh.count: ${oldCount} → ${newCount}`);
+      }
     }
   }
 
@@ -444,16 +552,64 @@ export class ParticleSystem {
       bySlot.set(p.slot, (bySlot.get(p.slot) || 0) + 1);
     }
 
+    // Report mesh.count for current shape
+    const mesh = this.instancedMeshes.get(this.currentShape);
+    const meshCount = mesh?.count || 0;
+
     return {
       total: this.particles.size,
       locked,
       unlocked,
-      slots: Array.from(bySlot.entries()).slice(0, 5) // Show top 5 slots
+      slots: Array.from(bySlot.entries()).slice(0, 5), // Show top 5 slots
+      meshCount: meshCount
     };
   }
 
   getParticlesForBlock(): Particle[] {
     return Array.from(this.particles.values());
+  }
+
+  // Debug a specific particle instance when clicked
+  debugParticleInstance(mesh: THREE.InstancedMesh, instanceId: number) {
+    // Find which shape this mesh belongs to
+    const shape = this.getShapeForMesh(mesh);
+    if (!shape) {
+      console.error('❌ Unknown mesh - not tracked by particle system');
+      return;
+    }
+
+    console.log('Shape:', shape);
+
+    // Find the particle with this instance ID
+    let foundParticle: Particle | null = null;
+    for (const particle of this.particles.values()) {
+      if (particle.instanceId === instanceId && particle.mesh === mesh) {
+        foundParticle = particle;
+        break;
+      }
+    }
+
+    if (foundParticle) {
+      console.log('✅ Found active particle:');
+      console.log('  ID:', foundParticle.id);
+      console.log('  Slot:', foundParticle.slot);
+      console.log('  Current slot:', this.particles.values().next().value?.slot, '(for comparison)');
+      console.log('  Position:', foundParticle.position);
+      console.log('  Locked:', foundParticle.locked);
+      console.log('  Locked position:', foundParticle.lockedPosition);
+      console.log('  Lifetime:', foundParticle.lifetime, '/', foundParticle.maxLifetime);
+      console.log('  Velocity:', foundParticle.velocity);
+      console.log('  Size:', foundParticle.size);
+      console.log('  Color:', foundParticle.color.getHexString());
+      console.log('  Trade volume:', foundParticle.trade?.vu);
+    } else {
+      console.error('❓ MYSTERY: Instance not in active particles map');
+      console.log('This instance is being rendered but has no particle data');
+    }
+
+    // Show overall stats
+    const stats = this.getStats();
+    console.log('Overall stats:', stats);
   }
 
   clear() {
