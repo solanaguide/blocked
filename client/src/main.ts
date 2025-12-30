@@ -1,12 +1,21 @@
-import { Scene } from './scene/Scene';
+import { SceneManager } from './core/SceneManager';
+import { DataProcessor } from './data/DataProcessor';
+import { BlockVisualization } from './visualizations/BlockVisualization';
 import { HUD } from './hud/HUD';
 import type { WSMessage, BatchMessage, BlockCompleteMessage, StatsMessage } from '../../shared/types';
 import type { FocusMode, ParticleShape } from './types';
 
-// Initialize
+// Initialize DataProcessor and SceneManager
 const container = document.getElementById('canvas-container')!;
-const scene = new Scene(container);
+const dataProcessor = new DataProcessor(50); // 50ms grace period
+const sceneManager = new SceneManager(container, dataProcessor);
 const hud = new HUD();
+
+// Register visualizations
+sceneManager.registerScene('blocks', () => new BlockVisualization());
+
+// Start with blocks visualization
+sceneManager.switchScene('blocks');
 
 // Create worker
 const worker = new Worker(new URL('./worker.ts', import.meta.url), {
@@ -46,9 +55,9 @@ function handleWSMessage(message: WSMessage) {
   if (message.type === 'trades') {
     const batch = message as BatchMessage;
 
-    // Add trades to scene
+    // Process trades through DataProcessor
     for (const trade of batch.batch) {
-      scene.addTrade(trade);
+      dataProcessor.processTrade(trade);
       tradesThisSecond++;
       volumeThisSecond += trade.vu;
 
@@ -144,67 +153,86 @@ function updateLeaderboards() {
 
 // Hotkey controls
 document.addEventListener('keydown', (e) => {
+  const activeScene = sceneManager.getActiveScene();
+
   // Particle shapes (1-5)
   if (e.key === '1') {
     currentShape = 'cube';
-    scene.setParticleShape(currentShape);
+    if (activeScene?.setParticleShape) activeScene.setParticleShape(currentShape);
     hud.showNotification('Shape: Cube', 1000);
   }
   if (e.key === '2') {
     currentShape = 'octahedron';
-    scene.setParticleShape(currentShape);
+    if (activeScene?.setParticleShape) activeScene.setParticleShape(currentShape);
     hud.showNotification('Shape: Octahedron', 1000);
   }
   if (e.key === '3') {
     currentShape = 'tetrahedron';
-    scene.setParticleShape(currentShape);
+    if (activeScene?.setParticleShape) activeScene.setParticleShape(currentShape);
     hud.showNotification('Shape: Tetrahedron', 1000);
   }
   if (e.key === '4') {
     currentShape = 'sphere';
-    scene.setParticleShape(currentShape);
+    if (activeScene?.setParticleShape) activeScene.setParticleShape(currentShape);
     hud.showNotification('Shape: Sphere', 1000);
   }
   if (e.key === '5') {
     currentShape = 'torus';
-    scene.setParticleShape(currentShape);
+    if (activeScene?.setParticleShape) activeScene.setParticleShape(currentShape);
     hud.showNotification('Shape: Torus', 1000);
   }
 
   // Focus modes
   if (e.key.toLowerCase() === 'f') {
     currentMode = 'free';
-    scene.setFocusMode(currentMode);
+    if (activeScene?.setFocusMode) activeScene.setFocusMode(currentMode);
     hud.updateMode('free');
     hud.showNotification('Mode: Free', 1000);
   }
   if (e.key.toLowerCase() === 'p') {
     currentMode = 'program';
-    scene.setFocusMode(currentMode);
+    if (activeScene?.setFocusMode) activeScene.setFocusMode(currentMode);
     hud.updateMode('program');
     hud.showNotification('Mode: Program', 1000);
   }
   if (e.key.toLowerCase() === 't') {
     currentMode = 'token';
-    scene.setFocusMode(currentMode);
+    if (activeScene?.setFocusMode) activeScene.setFocusMode(currentMode);
     hud.updateMode('token');
     hud.showNotification('Mode: Token', 1000);
   }
   if (e.key.toLowerCase() === 'v') {
     currentMode = 'volume';
-    scene.setFocusMode(currentMode);
+    if (activeScene?.setFocusMode) activeScene.setFocusMode(currentMode);
     hud.updateMode('volume');
     hud.showNotification('Mode: Volume', 1000);
   }
 
   // Size adjustment
   if (e.key === '+' || e.key === '=') {
-    scene.adjustParticleSize(0.2);
+    if (activeScene?.adjustParticleSize) activeScene.adjustParticleSize(0.2);
     hud.showNotification('Size: +', 1000);
   }
   if (e.key === '-' || e.key === '_') {
-    scene.adjustParticleSize(-0.2);
+    if (activeScene?.adjustParticleSize) activeScene.adjustParticleSize(-0.2);
     hud.showNotification('Size: -', 1000);
+  }
+
+  // Scene switching (NEW!)
+  if (e.key === '[') {
+    sceneManager.previousScene();
+    hud.showNotification(`Scene: ${sceneManager.getActiveSceneName()}`, 2000);
+  }
+  if (e.key === ']') {
+    sceneManager.nextScene();
+    hud.showNotification(`Scene: ${sceneManager.getActiveSceneName()}`, 2000);
+  }
+
+  // Auto-cycle toggle (NEW!)
+  if (e.key.toLowerCase() === 'a') {
+    const isAutoCycling = !(sceneManager as any).autoCycle;
+    sceneManager.setAutoCycle(isAutoCycling, 30000);
+    hud.showNotification(isAutoCycling ? 'Auto-cycle: ON' : 'Auto-cycle: OFF', 2000);
   }
 
   // Leaderboard mode toggle
@@ -232,9 +260,10 @@ function formatNumber(num: number): string {
   return num.toFixed(2);
 }
 
-// Set initial mode
-scene.setParticleShape('cube');
-scene.setFocusMode('volume');
+// Set initial mode for BlockVisualization
+const initialScene = sceneManager.getActiveScene();
+if (initialScene?.setParticleShape) initialScene.setParticleShape('cube');
+if (initialScene?.setFocusMode) initialScene.setFocusMode('volume');
 
 console.log('🚀 Solana Block Visualizer initialized');
 console.log('📝 Controls:');
@@ -243,3 +272,5 @@ console.log('  F: Free mode | P: Program mode | T: Token mode | V: Volume mode')
 console.log('  +/-: Adjust particle size');
 console.log('  L: Toggle leaderboards (60s window / last block)');
 console.log('  C: Toggle charts (per second / per block)');
+console.log('  [/]: Previous/Next visualization scene');
+console.log('  A: Toggle auto-cycle');

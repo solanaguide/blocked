@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { Environment } from './Environment';
 import { ParticleSystem } from './ParticleSystem';
 import { BlockBuilder } from './BlockBuilder';
+import { DataProcessor } from '../data/DataProcessor';
 import type { TradeMessage } from '../../../shared/types';
 import type { FocusMode, ParticleShape, BlockData } from '../types';
 
@@ -12,19 +13,15 @@ export class Scene {
   private environment: Environment;
   private particleSystem: ParticleSystem;
   private blockBuilder: BlockBuilder;
+  private dataProcessor: DataProcessor;
 
   private clock: THREE.Clock;
   private lastTime: number = 0;
-
-  private currentSlot: number = 0;
   private blockStartTime: number = Date.now();
-  private slotChangeTime: number = 0;
-  private gracePeriodMs: number = 50; // Grace period to buffer new slot particles before sweeping old block
-  private inGracePeriod: boolean = false;
-  private pendingSlot: number = 0;
-  private tradeBuffer: TradeMessage[] = [];
 
-  constructor(container: HTMLElement) {
+  constructor(container: HTMLElement, dataProcessor?: DataProcessor) {
+    // Use provided DataProcessor or create a new one
+    this.dataProcessor = dataProcessor || new DataProcessor();
     // Create scene
     this.scene = new THREE.Scene();
 
@@ -56,6 +53,27 @@ export class Scene {
 
     // Setup clock
     this.clock = new THREE.Clock();
+
+    // Setup DataProcessor callbacks
+    this.dataProcessor.onTrade((trade, slot) => {
+      this.particleSystem.addTrade(trade, slot);
+    });
+
+    this.dataProcessor.onGracePeriodEnd((oldSlot, newSlot, bufferedTrades) => {
+      console.log(`⏱️ Grace period ended, sweeping slot ${oldSlot}, spawning ${bufferedTrades.length} buffered particles for slot ${newSlot}`);
+
+      // Complete the old block (triggers sweep)
+      this.onBlockComplete(oldSlot, newSlot);
+
+      // SIMPLE CLEANUP: Remove all particles older than 2 slots ago
+      const minSlot = newSlot - 2;
+      this.particleSystem.removeParticlesOlderThan(minSlot);
+
+      // Spawn all buffered particles at once for the new slot
+      for (const bufferedTrade of bufferedTrades) {
+        this.particleSystem.addTrade(bufferedTrade, bufferedTrade.s);
+      }
+    });
 
     // Handle window resize
     window.addEventListener('resize', this.onWindowResize.bind(this));
@@ -115,29 +133,8 @@ export class Scene {
 
     const time = this.clock.getElapsedTime() * 1000;
 
-    // Check if grace period expired - if so, sweep old block and spawn buffered particles
-    const now = Date.now();
-    if (this.inGracePeriod && (now - this.slotChangeTime) >= this.gracePeriodMs) {
-      console.log(`⏱️ Grace period ended, sweeping slot ${this.currentSlot}, spawning ${this.tradeBuffer.length} buffered particles for slot ${this.pendingSlot}`);
-
-      // Complete the old block (triggers sweep)
-      this.onBlockComplete(this.currentSlot, this.pendingSlot);
-
-      // SIMPLE CLEANUP: Remove all particles older than 2 slots ago
-      // This catches any orphans, failed locks, or particles that didn't get cleaned up
-      const minSlot = this.pendingSlot - 2;
-      this.particleSystem.removeParticlesOlderThan(minSlot);
-
-      // Spawn all buffered particles at once for the new slot
-      for (const bufferedTrade of this.tradeBuffer) {
-        this.particleSystem.addTrade(bufferedTrade, bufferedTrade.s);
-      }
-
-      // Clear buffer and update state
-      this.tradeBuffer = [];
-      this.currentSlot = this.pendingSlot;
-      this.inGracePeriod = false;
-    }
+    // Update DataProcessor (handles grace period logic)
+    this.dataProcessor.update(deltaTime);
 
     // Update subsystems
     this.environment.update(time);
@@ -163,11 +160,15 @@ export class Scene {
     this.lastTime = time;
   }
 
-  addTrade(trade: TradeMessage) {
-    const now = Date.now();
+  private firstTradeHandled = false;
 
-    // FIRST TRADE EVER: Create initial block before anything else
-    if (this.currentSlot === 0) {
+  addTrade(trade: TradeMessage) {
+    // Delegate to DataProcessor - it handles all the slot detection and buffering logic
+    this.dataProcessor.processTrade(trade);
+
+    // On first trade, create initial block
+    if (!this.firstTradeHandled && this.dataProcessor.getCurrentSlot() > 0) {
+      this.firstTradeHandled = true;
       console.log(`🎬 First trade! Creating initial block for slot ${trade.s}`);
       const blockData: BlockData = {
         slot: trade.s,
@@ -177,43 +178,7 @@ export class Scene {
         particles: [],
       };
       this.blockBuilder.startBlock(blockData);
-      this.currentSlot = trade.s;
-      this.slotChangeTime = now;
-      this.particleSystem.addTrade(trade, trade.s);
-      return;
     }
-
-    // Check for slot change
-    if (trade.s !== this.currentSlot && !this.inGracePeriod) {
-      // New slot detected! Start grace period
-      console.log(`🔄 Slot change detected: ${this.currentSlot} → ${trade.s}, starting ${this.gracePeriodMs}ms grace period`);
-
-      // IMMEDIATE CLEANUP: Remove particles from really old slots (safety net)
-      const minSlot = trade.s - 3;
-      this.particleSystem.removeParticlesOlderThan(minSlot);
-
-      this.inGracePeriod = true;
-      this.pendingSlot = trade.s;
-      this.slotChangeTime = now;
-      // Buffer this trade instead of spawning it
-      this.tradeBuffer.push(trade);
-      return;
-    }
-
-    // During grace period: buffer new slot trades, spawn old slot trades
-    if (this.inGracePeriod) {
-      if (trade.s === this.pendingSlot) {
-        // Buffer new slot trades
-        this.tradeBuffer.push(trade);
-      } else {
-        // Spawn old slot trades immediately (stragglers)
-        this.particleSystem.addTrade(trade, trade.s);
-      }
-      return;
-    }
-
-    // Normal operation: spawn particle immediately
-    this.particleSystem.addTrade(trade, trade.s);
   }
 
   onBlockComplete(oldSlot: number, newSlot: number) {
