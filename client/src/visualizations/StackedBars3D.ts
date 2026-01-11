@@ -63,8 +63,6 @@ export class StackedBars3D extends BaseVisualization {
   }
 
   onBlockComplete(blockData: BlockData, oldSlot: number, newSlot: number): void {
-    console.log(`🔥 Block ${newSlot} complete - ${blockData.trades} trades`);
-
     // WHOOSH pulse effect
     this.pulseIntensity = 2.0;
   }

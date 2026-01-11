@@ -152,8 +152,6 @@ export class FrequencyBars extends BaseVisualization {
   }
 
   onBlockComplete(blockData: BlockData, oldSlot: number, newSlot: number): void {
-    console.log(`🎵 Block ${newSlot} complete - ${blockData.trades} trades, $${blockData.volume.toFixed(2)}`);
-
     // BASS KICK EFFECT: Trigger bloom pulse
     this.bloomIntensity = 2.0;
 

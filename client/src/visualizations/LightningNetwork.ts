@@ -226,8 +226,6 @@ export class LightningNetwork extends BaseVisualization {
   }
 
   onBlockComplete(blockData: BlockData, oldSlot: number, newSlot: number): void {
-    console.log(`⚡ Block ${newSlot} complete - ${blockData.trades} trades`);
-
     // Pulse all nodes simultaneously
     this.energyPulse = 1.0;
 

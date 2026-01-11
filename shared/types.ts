@@ -49,4 +49,81 @@ export interface BlockCompleteMessage {
   timestamp: number;
 }
 
-export type WSMessage = BatchMessage | StatsMessage | BlockCompleteMessage;
+/**
+ * Rich block data from block:update Redis channel
+ * Provides comprehensive metrics for Volume (economic activity) and Revenue (network PMF)
+ */
+export interface BlockMessage {
+  type: 'block';
+
+  // Core block info
+  slot: number;
+  parentSlot: number;
+  blockhash: string;
+  blockTime: number;
+  epoch: number;
+  leader: string;
+
+  // Transaction counts
+  txns: number;              // total transactions
+  votes: number;             // validator vote transactions
+  completed: number;         // completed non-vote (from 'success')
+  reverted: number;          // reverted non-vote (from 'failed')
+
+  // Compute Units
+  cu: number;                // total CU used
+  completedCu: number;       // CU by completed txns
+  revertedCu: number;        // CU by reverted txns
+  avgCu: number;
+  medianCu: number;
+
+  // Fees (lamports)
+  allFees: number;
+  baseFees: number;
+  priorityFees: number;
+  rewards: number;
+  avgFee: number;
+  medianFee: number;
+  feesPerVolumeBps: number;
+
+  // Jito MEV
+  jitoTxns: number;
+  jitoTotal: number;
+  jitoAvgTip: number;
+  jitoMedianTip: number;
+  jitoCu: number;
+
+  // Priority fees
+  priorityTxns: number;
+  priorityAvg: number;
+  priorityMedian: number;
+  priorityMin: number;
+  priorityMax: number;
+  dualTipTxns: number;
+
+  // Swaps (VOLUME - economic activity)
+  swapTxns: number;
+  swapCount: number;
+  swapVolumeUsd: number;     // Already divided by 1e12 for USD
+  uniqueTraders: number;
+  uniquePools: number;
+  uniqueTokens: number;
+
+  // Transfers (VOLUME - economic activity)
+  transferTxns: number;
+  transferCount: number;
+  transferVolumeUsd: number; // Already divided by 1e12 for USD
+
+  // Accounts
+  uniqueAccounts: number;
+  uniqueWritable: number;
+  uniquePrograms: number;
+  uniqueSigners: number;
+
+  // Instructions
+  totalInstructions: number;
+  totalInnerInstructions: number;
+  avgCpiDepth: number;
+}
+
+export type WSMessage = BatchMessage | StatsMessage | BlockCompleteMessage | BlockMessage;

@@ -3,7 +3,7 @@ import { BaseVisualization } from '../core/BaseVisualization';
 import { Environment } from '../scene/Environment';
 import { ParticleSystem } from '../scene/ParticleSystem';
 import { BlockBuilder } from '../scene/BlockBuilder';
-import type { TradeMessage } from '../../../shared/types';
+import type { TradeMessage, BlockMessage } from '../../../shared/types';
 import type { FocusMode, ParticleShape, BlockData } from '../types';
 
 /**
@@ -17,6 +17,11 @@ export class BlockVisualization extends BaseVisualization {
   private lastTime: number = 0;
   private blockStartTime: number = Date.now();
   private firstTradeHandled = false;
+
+  // Block data state
+  private showVoteParticles: boolean = true;
+  private lastBlockSlot: number = 0;
+  private currentBlockData: BlockMessage | null = null;
 
   constructor() {
     super();
@@ -38,7 +43,6 @@ export class BlockVisualization extends BaseVisualization {
     // On first trade, create initial block
     if (!this.firstTradeHandled) {
       this.firstTradeHandled = true;
-      console.log(`🎬 First trade! Creating initial block for slot ${slot}`);
       const blockData: BlockData = {
         slot: slot,
         trades: 0,
@@ -54,7 +58,6 @@ export class BlockVisualization extends BaseVisualization {
   }
 
   onBlockComplete(blockData: BlockData, oldSlot: number, newSlot: number): void {
-    console.log(`⏱️ Block complete, sweeping slot ${oldSlot}, starting slot ${newSlot}`);
 
     // SIMPLE CLEANUP: Remove all particles older than 2 slots ago
     const minSlot = newSlot - 2;
@@ -96,13 +99,6 @@ export class BlockVisualization extends BaseVisualization {
       this.particleSystem.removeParticlesForSlot(slot);
     }
 
-    // Debug logging every 3 seconds
-    if (Math.floor(time / 3000) !== Math.floor(this.lastTime / 3000)) {
-      const stats = this.particleSystem.getStats();
-      const slotInfo = stats.slots.map(([slot, count]) => `${slot}:${count}`).join(', ');
-      console.log(`📊 Particles: ${stats.total} total (${stats.locked} locked, ${stats.unlocked} unlocked) | Slots: ${slotInfo} | mesh.count: ${stats.meshCount}`);
-    }
-
     this.lastTime = time;
   }
 
@@ -125,13 +121,8 @@ export class BlockVisualization extends BaseVisualization {
 
       // Check if it's an instanced mesh (particle)
       if (intersection.object instanceof THREE.InstancedMesh && intersection.instanceId !== undefined) {
-        console.log('🔍 ========== PARTICLE DEBUG INFO ==========');
-        console.log('Instance ID:', intersection.instanceId);
-        console.log('Intersection point:', intersection.point);
-
         // Ask particle system to debug this instance
         this.particleSystem.debugParticleInstance(intersection.object, intersection.instanceId);
-        console.log('🔍 =========================================');
       }
     }
   }
@@ -156,6 +147,61 @@ export class BlockVisualization extends BaseVisualization {
   adjustParticleSize(delta: number): void {
     const current = (this.particleSystem as any).sizeMultiplier || 1.0;
     this.particleSystem.setSizeMultiplier(current + delta);
+  }
+
+  /**
+   * Handle rich block data from block:update stream
+   * Spawns particles for ALL transaction types (votes, completed, reverted)
+   */
+  onBlockData(block: BlockMessage): void {
+    // Skip if we already processed this block
+    if (block.slot === this.lastBlockSlot) {
+      return;
+    }
+    this.lastBlockSlot = block.slot;
+    this.currentBlockData = block;
+
+    // Calculate how many particles to spawn
+    // We scale down to keep performance reasonable
+    // Original: ~1500 txns per block, we spawn proportionally
+    const scaleFactor = 0.1; // Show 10% of actual tx counts
+
+    // Vote particles (golden) - network consensus heartbeat
+    if (this.showVoteParticles) {
+      const voteCount = Math.ceil(block.votes * scaleFactor * 0.5); // Extra reduction for votes
+      if (voteCount > 0) {
+        this.particleSystem.addTxTypeParticles(voteCount, 'vote', block.slot, 0.3);
+      }
+    }
+
+    // Completed transaction particles (cyan)
+    const completedCount = Math.ceil(block.completed * scaleFactor);
+    if (completedCount > 0) {
+      this.particleSystem.addTxTypeParticles(completedCount, 'completed', block.slot, 0.5);
+    }
+
+    // Reverted transaction particles (amber)
+    const revertedCount = Math.ceil(block.reverted * scaleFactor);
+    if (revertedCount > 0) {
+      this.particleSystem.addTxTypeParticles(revertedCount, 'reverted', block.slot, 0.5);
+    }
+
+    // Jito MEV particles (orange) - if there are jito transactions
+    if (block.jitoTxns > 0) {
+      const jitoCount = Math.ceil(block.jitoTxns * scaleFactor);
+      if (jitoCount > 0) {
+        this.particleSystem.addTxTypeParticles(jitoCount, 'jito', block.slot, 0.7);
+      }
+    }
+
+  }
+
+  /**
+   * Toggle vote particle visibility
+   */
+  toggleVoteParticles(): boolean {
+    this.showVoteParticles = !this.showVoteParticles;
+    return this.showVoteParticles;
   }
 
   /**

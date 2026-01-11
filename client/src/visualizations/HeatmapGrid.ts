@@ -131,8 +131,6 @@ export class HeatmapGrid extends BaseVisualization {
   }
 
   onBlockComplete(blockData: BlockData, oldSlot: number, newSlot: number): void {
-    console.log(`🗺️ Block ${newSlot} complete - ${blockData.trades} trades`);
-
     // Wave ripple effect from center
     this.rippleWave = 1.0;
     this.rippleOrigin = { x: 0, z: 0 };

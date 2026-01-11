@@ -1,6 +1,6 @@
 import { IVisualization } from './IVisualization';
 import { DataProcessor } from '../data/DataProcessor';
-import type { TradeMessage } from '../../../shared/types';
+import type { TradeMessage, BlockMessage } from '../../../shared/types';
 import type { BlockData } from '../types';
 
 /**
@@ -37,18 +37,17 @@ export class SceneManager {
       }
     });
 
-    this.dataProcessor.onGracePeriodEnd((oldSlot, newSlot, bufferedTrades) => {
+    // Block completion is now triggered by block:update stream
+    this.dataProcessor.onBlockComplete((blockData, oldSlot, newSlot) => {
       if (this.activeScene) {
-        // Build block data for the completed block
-        const blockData: BlockData = {
-          slot: newSlot,
-          trades: bufferedTrades.length,
-          volume: bufferedTrades.reduce((sum, t) => sum + t.vu, 0),
-          timestamp: Date.now(),
-          particles: [], // Visualizations will populate this if needed
-        };
-
         this.activeScene.onBlockComplete(blockData, oldSlot, newSlot);
+      }
+    });
+
+    // Hook for rich block data from block:update stream
+    this.dataProcessor.onBlockData((block: BlockMessage) => {
+      if (this.activeScene && this.activeScene.onBlockData) {
+        this.activeScene.onBlockData(block);
       }
     });
   }
@@ -59,12 +58,7 @@ export class SceneManager {
    * @param factory Function that creates a new instance of the visualization
    */
   registerScene(name: string, factory: () => IVisualization): void {
-    if (this.scenes.has(name)) {
-      console.warn(`⚠️ Scene "${name}" already registered, overwriting`);
-    }
-
     this.scenes.set(name, factory);
-    console.log(`📝 Registered scene: ${name}`);
   }
 
   /**
@@ -79,11 +73,8 @@ export class SceneManager {
 
     // Don't switch if already active
     if (this.activeSceneName === name) {
-      console.log(`✓ Scene "${name}" already active`);
       return true;
     }
-
-    console.log(`🔄 Switching from "${this.activeSceneName || 'none'}" to "${name}"`);
 
     // Dispose old scene
     if (this.activeScene) {
@@ -103,7 +94,6 @@ export class SceneManager {
       this.resetAutoCycleTimer();
     }
 
-    console.log(`✨ Switched to scene: ${name}`);
     return true;
   }
 
@@ -168,13 +158,11 @@ export class SceneManager {
 
     if (enabled) {
       this.resetAutoCycleTimer();
-      console.log(`🔄 Auto-cycle enabled (${intervalMs / 1000}s intervals)`);
     } else {
       if (this.autoCycleTimer) {
         clearTimeout(this.autoCycleTimer);
         this.autoCycleTimer = null;
       }
-      console.log('⏸️ Auto-cycle disabled');
     }
   }
 

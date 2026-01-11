@@ -14,12 +14,12 @@ import { TradeStream } from './visualizations/TradeStream';
 import { NyanTrade } from './visualizations/NyanTrade';
 import { ECGMonitor } from './visualizations/ECGMonitor';
 import { HUD } from './hud/HUD';
-import type { WSMessage, BatchMessage, BlockCompleteMessage, StatsMessage } from '../../shared/types';
+import type { WSMessage, BatchMessage, BlockCompleteMessage, StatsMessage, BlockMessage } from '../../shared/types';
 import type { FocusMode, ParticleShape } from './types';
 
 // Initialize DataProcessor and SceneManager
 const container = document.getElementById('canvas-container')!;
-const dataProcessor = new DataProcessor(50); // 50ms grace period
+const dataProcessor = new DataProcessor(); // Block transitions now driven by block:update stream
 const sceneManager = new SceneManager(container, dataProcessor);
 const hud = new HUD();
 
@@ -61,12 +61,10 @@ worker.onmessage = (event) => {
   const { type, data } = event.data;
 
   if (type === 'connected') {
-    console.log('✅ Connected to WebSocket server');
     hud.showNotification('Connected to Solana stream', 2000);
   }
 
   if (type === 'disconnected') {
-    console.log('❌ Disconnected from WebSocket server');
     hud.showNotification('Disconnected - reconnecting...', 2000);
   }
 
@@ -115,32 +113,20 @@ function handleWSMessage(message: WSMessage) {
 
   if (message.type === 'block_complete') {
     const block = message as BlockCompleteMessage;
-    console.log(`✅ Block ${block.slot} complete: ${block.trades} trades, $${block.volume.toFixed(2)}`);
-
-    // Add to block log instead of showing notification
     hud.addBlockLogEntry(block.slot, block.trades, block.volume);
+  }
+
+  if (message.type === 'block') {
+    const block = message as BlockMessage;
+    dataProcessor.processBlock(block);
+    hud.updateBlockData(block);
   }
 
   if (message.type === 'stats') {
     const stats = message as StatsMessage;
 
-    console.log('📊 Stats received:', {
-      windowTrades: stats.window.trades,
-      windowVolume: stats.window.volume,
-      windowPrograms: Object.keys(stats.window.programs).length,
-      windowTokens: Object.keys(stats.window.tokenVolumes).length,
-      lastBlockSlot: stats.lastBlock.slot,
-      lastBlockTrades: stats.lastBlock.trades,
-      lastBlockPrograms: Object.keys(stats.lastBlock.programs).length,
-      lastBlockTokens: Object.keys(stats.lastBlock.tokenVolumes).length
-    });
-
-    // Update last block stats in left panel
     if (stats.lastBlock && stats.lastBlock.slot > 0) {
-      console.log(`📋 Updating block stats: slot ${stats.lastBlock.slot}, trades ${stats.lastBlock.trades}, volume ${stats.lastBlock.volume}`);
       hud.updateBlockStats(stats.lastBlock.slot, stats.lastBlock.trades, stats.lastBlock.volume);
-    } else {
-      console.warn('⚠️ lastBlock is invalid:', stats.lastBlock);
     }
 
     // Store both window and block data for toggling
@@ -149,12 +135,6 @@ function handleWSMessage(message: WSMessage) {
     (window as any).cachedBlockPrograms = stats.lastBlock.programs || {};
     (window as any).cachedBlockTokens = stats.lastBlock.tokenVolumes || {};
 
-    console.log('💾 Cached data:', {
-      windowPrograms: Object.keys((window as any).cachedWindowPrograms).length,
-      blockPrograms: Object.keys((window as any).cachedBlockPrograms).length
-    });
-
-    // Update leaderboards based on current mode
     updateLeaderboards();
   }
 }
@@ -274,6 +254,15 @@ document.addEventListener('keydown', (e) => {
     hud.showNotification(`Charts: ${mode}`, 2000);
     hud.setChartMode(chartMode);
   }
+
+  // Vote particles toggle (G for Golden votes)
+  if (e.key.toLowerCase() === 'g') {
+    const scene = sceneManager.getActiveScene();
+    if (scene && 'toggleVoteParticles' in scene) {
+      const showVotes = (scene as any).toggleVoteParticles();
+      hud.showNotification(showVotes ? 'Vote particles: ON' : 'Vote particles: OFF', 2000);
+    }
+  }
 });
 
 // Utility
@@ -288,28 +277,3 @@ function formatNumber(num: number): string {
 const initialScene = sceneManager.getActiveScene();
 if (initialScene?.setParticleShape) initialScene.setParticleShape('cube');
 if (initialScene?.setFocusMode) initialScene.setFocusMode('volume');
-
-console.log('🚀 Solana Block Visualizer initialized');
-console.log('📝 Available Visualizations (13 total):');
-console.log('  1. Blocks - Original falling particles');
-console.log('  2. Frequency - Winamp EQ bars');
-console.log('  3. Waveform - Synthwave oscilloscope');
-console.log('  4. Galaxy - SOL-centered token orbits');
-console.log('  5. Lightning - Program network bolts');
-console.log('  6. Tunnel - VR highway flight');
-console.log('  7. Heatmap - 3D program×token grid');
-console.log('  8. Nebula - Floating particle cloud');
-console.log('  9. DoubleSidedEQ - Trades vs Volume bars');
-console.log('  10. StackedBars - Scrolling fire chart');
-console.log('  11. TradeStream - Horizontal trade flow');
-console.log('  12. NyanTrade - Rainbow token tail');
-console.log('  13. ECG - Heartbeat monitor');
-console.log('');
-console.log('📝 Controls:');
-console.log('  [/]: Previous/Next visualization');
-console.log('  A: Toggle auto-cycle (30s)');
-console.log('  1-5: Change particle shape (Blocks only)');
-console.log('  F/P/T/V: Focus modes (Blocks only)');
-console.log('  +/-: Particle size (Blocks only)');
-console.log('  L: Toggle leaderboards (60s window / last block)');
-console.log('  C: Toggle charts (per second / per block)');

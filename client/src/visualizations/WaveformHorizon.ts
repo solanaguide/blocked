@@ -133,8 +133,6 @@ export class WaveformHorizon extends BaseVisualization {
   }
 
   onBlockComplete(blockData: BlockData, oldSlot: number, newSlot: number): void {
-    console.log(`🌊 Block ${newSlot} complete - ${blockData.trades} trades, $${blockData.volume.toFixed(2)}`);
-
     // BASS KICK: Screen flash effect
     this.screenFlash = 1.0;
 

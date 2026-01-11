@@ -146,8 +146,6 @@ export class TradeStream extends BaseVisualization {
   }
 
   onBlockComplete(blockData: BlockData, oldSlot: number, newSlot: number): void {
-    console.log(`💨 Block ${newSlot} complete - ${blockData.trades} trades`);
-
     // Create vertical divider that sweeps across screen
     this.createBlockDivider(newSlot);
   }

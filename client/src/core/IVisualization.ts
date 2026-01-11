@@ -1,4 +1,4 @@
-import type { TradeMessage } from '../../../shared/types';
+import type { TradeMessage, BlockMessage } from '../../../shared/types';
 import type { BlockData, FocusMode, ParticleShape } from '../types';
 import type { DataProcessor } from '../data/DataProcessor';
 
@@ -79,4 +79,10 @@ export interface IVisualization {
    * Optional: Adjust particle size (if visualization supports it)
    */
   adjustParticleSize?(delta: number): void;
+
+  /**
+   * Optional: Handle rich block data from block:update stream
+   * Used for multi-dimensional scaling based on Volume, Revenue, tx composition
+   */
+  onBlockData?(block: BlockMessage): void;
 }

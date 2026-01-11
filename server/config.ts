@@ -1,17 +1,20 @@
+// Environment-based configuration for production deployment
 export const config = {
   redis: {
-    host: 'localhost',
-    port: 16379,
+    host: process.env.REDIS_HOST || 'localhost',
+    port: parseInt(process.env.REDIS_PORT || '6379', 10),
     channels: {
       tradeExecuted: 'trade:executed',
       priceUpdate: 'price:update',
+      blockUpdate: 'block:update',
     },
   },
   websocket: {
-    port: 8080,
-    batchInterval: 50, // 50ms batching for 350ms blocks (7 batches per block)
+    port: parseInt(process.env.WS_PORT || '3847', 10),
+    batchInterval: parseInt(process.env.BATCH_INTERVAL || '50', 10),
   },
-  server: {
-    port: 3001,
+  cors: {
+    // Comma-separated list of allowed origins, or '*' for all
+    origins: process.env.CORS_ORIGINS || '*',
   },
 };

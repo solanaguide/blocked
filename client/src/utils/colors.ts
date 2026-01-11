@@ -1,6 +1,14 @@
 // Shared color mappings for programs and tokens
 // Used by both ParticleSystem and HUD for consistency
 
+// Transaction type colors (no red - reverts are valid outcomes)
+export const txTypeColors = {
+  vote: 0xFFD700,      // Golden - network consensus/validation heartbeat
+  completed: 0x00CED1, // Cyan/Teal - completed transactions
+  reverted: 0xFFA500,  // Amber/Orange - reverted but valid (slippage, etc)
+  jito: 0xFF8C00,      // Orange - MEV/Jito transactions
+};
+
 export const programColors: Map<string, number> = new Map([
   ['JUP', 0xb026ff],          // Jupiter - Electric Purple
   ['RAYDIUM_CLMM', 0x00f0ff], // Raydium CLMM - Neon Blue

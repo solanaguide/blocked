@@ -4,6 +4,7 @@ import { config } from './config.js';
 export class RedisSubscriber {
   private subscriber: Redis;
   private onTradeCallback?: (trade: any) => void;
+  private onBlockCallback?: (block: any) => void;
 
   constructor() {
     this.subscriber = new Redis({
@@ -21,8 +22,12 @@ export class RedisSubscriber {
   }
 
   async subscribe() {
-    await this.subscriber.subscribe(config.redis.channels.tradeExecuted);
+    await this.subscriber.subscribe(
+      config.redis.channels.tradeExecuted,
+      config.redis.channels.blockUpdate
+    );
     console.log(`📡 Subscribed to ${config.redis.channels.tradeExecuted}`);
+    console.log(`📡 Subscribed to ${config.redis.channels.blockUpdate}`);
 
     this.subscriber.on('message', (channel, message) => {
       if (channel === config.redis.channels.tradeExecuted) {
@@ -32,12 +37,23 @@ export class RedisSubscriber {
         } catch (err) {
           console.error('Failed to parse trade message:', err);
         }
+      } else if (channel === config.redis.channels.blockUpdate) {
+        try {
+          const block = JSON.parse(message);
+          this.onBlockCallback?.(block);
+        } catch (err) {
+          console.error('Failed to parse block message:', err);
+        }
       }
     });
   }
 
   onTrade(callback: (trade: any) => void) {
     this.onTradeCallback = callback;
+  }
+
+  onBlock(callback: (block: any) => void) {
+    this.onBlockCallback = callback;
   }
 
   async close() {

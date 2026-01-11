@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { IVisualization, IHUDConfig } from './IVisualization';
 import type { DataProcessor } from '../data/DataProcessor';
-import type { TradeMessage } from '../../../shared/types';
+import type { TradeMessage, BlockMessage } from '../../../shared/types';
 import type { BlockData, FocusMode, ParticleShape } from '../types';
 import { Tooltip, type InteractiveObject } from '../utils/Tooltip';
 
@@ -87,7 +87,6 @@ export abstract class BaseVisualization implements IVisualization {
     window.addEventListener('click', this.clickHandler);
 
     // NOTE: Animation loop is managed by SceneManager, not here
-    console.log(`✨ ${this.getName()} initialized`);
   }
 
   /**
@@ -140,7 +139,6 @@ export abstract class BaseVisualization implements IVisualization {
       }
     }
 
-    console.log(`🗑️ ${this.getName()} disposed`);
   }
 
   /**
@@ -238,4 +236,11 @@ export abstract class BaseVisualization implements IVisualization {
   abstract onTrade(trade: TradeMessage, slot: number): void;
   abstract onBlockComplete(blockData: BlockData, oldSlot: number, newSlot: number): void;
   abstract update(deltaTime: number): void;
+
+  /**
+   * Optional hook for rich block data from block:update stream
+   * Visualizations can implement this to access Volume, Revenue, and tx composition
+   * for multi-dimensional scaling
+   */
+  onBlockData?(block: BlockMessage): void;
 }

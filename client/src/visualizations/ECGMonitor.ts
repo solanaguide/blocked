@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { BaseVisualization } from '../core/BaseVisualization';
-import type { TradeMessage } from '../../../shared/types';
+import type { TradeMessage, BlockMessage } from '../../../shared/types';
 import type { BlockData } from '../types';
 
 /**
@@ -25,6 +25,11 @@ export class ECGMonitor extends BaseVisualization {
   private gridLines: THREE.Line[] = [];
   private batchPulse = 0;
   private labels: THREE.Sprite[] = [];
+
+  // Block data for scaling (Revenue focus)
+  private blockRevenue = 0;     // allFees + jitoTotal in SOL
+  private blockVolume = 0;      // swapVolume + transferVolume in USD
+  private completionRate = 1.0; // completed / (completed + reverted)
 
   constructor() {
     super();
@@ -163,16 +168,36 @@ export class ECGMonitor extends BaseVisualization {
   }
 
   onBlockComplete(blockData: BlockData, oldSlot: number, newSlot: number): void {
-    console.log(`💓 Block ${newSlot} complete - ${blockData.trades} trades`);
+    // Larger pulse for block completion - scaled by revenue
+    const revenuePulse = Math.min(3.0, 1.5 + this.blockRevenue * 20);
+    this.batchPulse = Math.max(this.batchPulse, revenuePulse);
 
-    // Larger pulse for block completion
-    this.batchPulse = Math.max(this.batchPulse, 2.0);
-
-    // Flash the grid
+    // Flash the grid - color based on completion rate
+    const flashColor = this.completionRate > 0.7 ? 0x00ff00 : 0xffa500; // Green or amber
     this.gridLines.forEach(line => {
       (line.material as THREE.LineBasicMaterial).opacity = 0.8;
-      (line.material as THREE.LineBasicMaterial).color.setHex(0x00ff00);
+      (line.material as THREE.LineBasicMaterial).color.setHex(flashColor);
     });
+  }
+
+  /**
+   * Handle rich block data - scale ECG by Revenue and Volume
+   */
+  onBlockData(block: BlockMessage): void {
+    // Revenue (primary metric) - in SOL
+    this.blockRevenue = (block.allFees + block.jitoTotal) / 1e9;
+
+    // Volume (secondary metric) - in USD
+    this.blockVolume = block.swapVolumeUsd + block.transferVolumeUsd;
+
+    // Completion rate for color warmth
+    const nonVote = block.completed + block.reverted;
+    this.completionRate = nonVote > 0 ? block.completed / nonVote : 1.0;
+
+    // Create spike for high priority fee events
+    if (block.priorityMax > 1e9) { // > 1 SOL max priority
+      this.batchPulse = Math.max(this.batchPulse, 4.0);
+    }
   }
 
   update(deltaTime: number): void {
@@ -209,22 +234,25 @@ export class ECGMonitor extends BaseVisualization {
   }
 
   private updateWaveforms(): void {
-    // Update volume waveform
+    // Scale factor based on block revenue (network heartbeat intensity)
+    const revenueScale = Math.min(2.0, 1.0 + this.blockRevenue * 10);
+
+    // Update volume waveform (scaled by trade volume + block volume)
     const volumeLine = this.waveformLines.get('volume')!;
-    const volumeAmplitude = Math.min(5, Math.log10(Math.max(1, this.currentVolume)) * 0.5);
-    const volumeValue = volumeLine.yOffset + volumeAmplitude + this.batchPulse;
+    const volumeAmplitude = Math.min(5, Math.log10(Math.max(1, this.currentVolume + this.blockVolume * 0.001)) * 0.5);
+    const volumeValue = volumeLine.yOffset + volumeAmplitude * revenueScale + this.batchPulse;
     this.updateWaveform(volumeLine, volumeValue);
 
     // Update trades waveform
     const tradesLine = this.waveformLines.get('trades')!;
     const tradesAmplitude = Math.min(4, this.currentTrades * 0.05);
-    const tradesValue = tradesLine.yOffset + tradesAmplitude + this.batchPulse * 0.8;
+    const tradesValue = tradesLine.yOffset + tradesAmplitude * revenueScale + this.batchPulse * 0.8;
     this.updateWaveform(tradesLine, tradesValue);
 
     // Update programs waveform
     const programsLine = this.waveformLines.get('programs')!;
     const programsAmplitude = Math.min(3, this.currentPrograms.size * 0.15);
-    const programsValue = programsLine.yOffset + programsAmplitude + this.batchPulse * 0.6;
+    const programsValue = programsLine.yOffset + programsAmplitude * revenueScale + this.batchPulse * 0.6;
     this.updateWaveform(programsLine, programsValue);
   }
 

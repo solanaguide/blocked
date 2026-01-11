@@ -2,6 +2,7 @@ import * as THREE from 'three';
 
 export type FocusMode = 'free' | 'program' | 'token' | 'volume';
 export type ParticleShape = 'cube' | 'octahedron' | 'tetrahedron' | 'sphere' | 'torus';
+export type TxType = 'vote' | 'completed' | 'reverted' | 'jito' | 'trade';
 
 export interface Particle {
   id: string;

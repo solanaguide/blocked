@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import type { TradeMessage } from '../../../shared/types';
-import type { Particle, ParticleShape, FocusMode } from '../types';
-import { programColors, tokenColors, hashColor, volumeHeatmap } from '../utils/colors';
+import type { Particle, ParticleShape, FocusMode, TxType } from '../types';
+import { programColors, tokenColors, hashColor, volumeHeatmap, txTypeColors } from '../utils/colors';
 
 export class ParticleSystem {
   private scene: THREE.Scene;
@@ -162,6 +162,81 @@ export class ParticleSystem {
     particle.lockedPosition.set(0, 0, 0);
 
     this.particles.set(particle.id, particle);
+  }
+
+  /**
+   * Add transaction-type particles (votes, completed, reverted)
+   * These are spawned when block data arrives to visualize ALL transactions
+   * @param count Number of particles to spawn
+   * @param txType Type of transaction (affects color)
+   * @param slot Slot number
+   * @param sizeScale Optional size multiplier (default 0.5 for smaller tx particles)
+   */
+  addTxTypeParticles(count: number, txType: TxType, slot: number, sizeScale: number = 0.5) {
+    const blockSize = 30;
+    const spawnHeight = 25 + Math.random() * 10;
+
+    // Get color for this tx type
+    const color = (txTypeColors as Record<string, number>)[txType] || 0xffffff;
+
+    // Spawn particles in a burst
+    for (let i = 0; i < count; i++) {
+      const spreadX = (Math.random() - 0.5) * blockSize * 1.0;
+      const spreadZ = (Math.random() - 0.5) * blockSize * 1.0;
+
+      const position = new THREE.Vector3(
+        spreadX,
+        spawnHeight + Math.random() * 5, // Slight height variance
+        spreadZ
+      );
+
+      // Velocity: primarily downward
+      const speed = 3.0 + Math.random() * 2;
+      const velocity = new THREE.Vector3(
+        -spreadX * 0.01,
+        -speed,
+        -spreadZ * 0.01
+      );
+
+      // Size based on tx type (votes smaller, others medium)
+      const baseSize = txType === 'vote' ? 0.4 : 0.6;
+      const size = baseSize * sizeScale * this.sizeMultiplier;
+
+      // Create particle with unique ID
+      const particleId = `${txType}-${slot}-${i}-${Math.random().toString(36).slice(2, 8)}`;
+
+      const particle: Particle = this.createNewParticle(slot);
+      particle.id = particleId;
+      particle.slot = slot;
+      particle.position.copy(position);
+      particle.velocity.copy(velocity);
+      particle.size = size;
+      particle.color.set(color);
+      particle.rotation.set(0, 0, 0);
+      particle.rotationSpeed.set(0, 0, 0);
+      particle.lifetime = 0;
+      particle.maxLifetime = 5000;
+      // Create minimal trade object for compatibility
+      particle.trade = {
+        s: slot,
+        t: Date.now(),
+        sig: particleId,
+        ta: '',
+        tb: '',
+        aa: '0',
+        ab: '0',
+        vu: 0,
+        p: txType,
+      };
+      particle.locked = false;
+      particle.lockedPosition.set(0, 0, 0);
+
+      this.particles.set(particle.id, particle);
+    }
+
+    if (count > 0) {
+      console.log(`✨ Spawned ${count} ${txType} particles for slot ${slot}`);
+    }
   }
 
   private createNewParticle(slot: number): Particle {

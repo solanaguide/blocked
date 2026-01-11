@@ -71,8 +71,6 @@ export class DoubleSidedEQ extends BaseVisualization {
   }
 
   onBlockComplete(blockData: BlockData, oldSlot: number, newSlot: number): void {
-    console.log(`🎚️ Block ${newSlot} complete`);
-
     // Massive pulse effect
     this.pulseIntensity = 3.0;
 

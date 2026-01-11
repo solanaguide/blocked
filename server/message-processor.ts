@@ -125,14 +125,11 @@ export class MessageProcessor {
       blockProgress,
     };
 
-    // Check if we've moved to a new slot
+    // Check if we've moved to a new slot (legacy: now driven by block:update)
     let blockComplete: BlockCompleteMessage | undefined;
     if (batch.length > 0) {
       const newSlot = batch[batch.length - 1].s;
       if (newSlot !== this.currentSlot && this.currentSlot !== 0) {
-        console.log(`🎯 Block ${this.currentSlot} complete! Trades: ${this.blockStats.trades}, Volume: ${this.blockStats.volume.toFixed(2)}`);
-        console.log(`   Programs:`, Object.keys(this.blockStats.programs).length, this.blockStats.programs);
-        console.log(`   Tokens:`, Object.keys(this.blockStats.tokenVolumes).length);
 
         blockComplete = {
           type: 'block_complete',
@@ -179,7 +176,6 @@ export class MessageProcessor {
       } else if (this.currentSlot === 0 && batch.length > 0) {
         // Initialize currentSlot on first batch
         this.currentSlot = newSlot;
-        console.log(`🚀 Initialized currentSlot to ${this.currentSlot}`);
       }
     }
 

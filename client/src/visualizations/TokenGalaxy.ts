@@ -209,8 +209,6 @@ export class TokenGalaxy extends BaseVisualization {
   }
 
   onBlockComplete(blockData: BlockData, oldSlot: number, newSlot: number): void {
-    console.log(`🌌 Block ${newSlot} complete - ${blockData.trades} trades`);
-
     // Nova burst from SOL sun
     this.blockPulse = 2.0;
     this.sunGlow.intensity = 15.0;

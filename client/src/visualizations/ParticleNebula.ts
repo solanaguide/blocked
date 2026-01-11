@@ -167,8 +167,6 @@ export class ParticleNebula extends BaseVisualization {
   }
 
   onBlockComplete(blockData: BlockData, oldSlot: number, newSlot: number): void {
-    console.log(`☁️ Block ${newSlot} complete - ${blockData.trades} trades`);
-
     // Gravitational collapse effect
     this.gravitationalCollapse = 1.0;
   }

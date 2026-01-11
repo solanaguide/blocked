@@ -127,8 +127,6 @@ export class VRTunnel extends BaseVisualization {
   }
 
   onBlockComplete(blockData: BlockData, oldSlot: number, newSlot: number): void {
-    console.log(`🚇 Block ${newSlot} complete - ${blockData.trades} trades, $${blockData.volume.toFixed(2)}`);
-
     // WHOOSH effect - speed burst
     this.whooshEffect = 3.0;
     this.tunnelSpeed += 5;

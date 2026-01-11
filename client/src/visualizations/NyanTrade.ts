@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { BaseVisualization } from '../core/BaseVisualization';
 import { tokenColors, hashColor } from '../utils/colors';
-import type { TradeMessage } from '../../../shared/types';
+import type { TradeMessage, BlockMessage } from '../../../shared/types';
 import type { BlockData } from '../types';
 
 /**
@@ -27,6 +27,11 @@ export class NyanTrade extends BaseVisualization {
   private pulseIntensity = 0;
   private currentTokenVolumes: Map<string, number> = new Map();
   private volumeDecayRate = 0.97;
+
+  // Block data for scaling (Volume focus)
+  private blockVolume = 0;        // swapVolume + transferVolume
+  private blockRevenue = 0;       // allFees + jitoTotal
+  private tailHeightScale = 1.0;  // Scales tail height based on volume
 
   constructor() {
     super();
@@ -154,7 +159,7 @@ export class NyanTrade extends BaseVisualization {
     if (totalVolume === 0) totalVolume = 1;
 
     const tailLength = 50;
-    const maxTailHeight = 10;
+    const maxTailHeight = 10 * this.tailHeightScale; // Scale by block volume
 
     // Create stacked area chart
     for (let i = 0; i <= this.tailSegments; i++) {
@@ -235,11 +240,29 @@ export class NyanTrade extends BaseVisualization {
   }
 
   onBlockComplete(blockData: BlockData, oldSlot: number, newSlot: number): void {
-    console.log(`🌈 Block ${newSlot} complete - ${blockData.trades} trades`);
-
-    // CAT BOOST effect
-    this.pulseIntensity = 2.0;
+    // CAT BOOST effect - scaled by revenue
+    const revenuePulse = Math.min(3.0, 1.5 + this.blockRevenue * 15);
+    this.pulseIntensity = revenuePulse;
     this.createSparkles();
+  }
+
+  /**
+   * Handle rich block data - scale Nyan by Volume
+   */
+  onBlockData(block: BlockMessage): void {
+    // Volume (primary metric) - affects tail width
+    this.blockVolume = block.swapVolumeUsd + block.transferVolumeUsd;
+
+    // Revenue (secondary) - affects brightness/glow
+    this.blockRevenue = (block.allFees + block.jitoTotal) / 1e9;
+
+    // Scale tail height based on volume (1M = normal, 10M = double)
+    this.tailHeightScale = Math.min(2.0, 0.5 + Math.log10(Math.max(1, this.blockVolume)) * 0.2);
+
+    // Update cat glow intensity based on revenue
+    if (this.catGlow) {
+      this.catGlow.intensity = Math.min(8, 3 + this.blockRevenue * 50);
+    }
   }
 
   private createSparkles(): void {

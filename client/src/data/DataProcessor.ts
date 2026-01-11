@@ -1,37 +1,36 @@
-import type { TradeMessage } from '../../../shared/types';
+import type { TradeMessage, BlockMessage } from '../../../shared/types';
 import type { BlockData } from '../types';
 
 /**
  * DataProcessor handles all data logic separated from visualization:
- * - Slot detection and tracking
- * - Grace period management
- * - Trade buffering
- * - Block completion detection
+ * - Trade processing and forwarding
+ * - Block completion detection (from block:update stream)
  * - Top programs and tokens tracking
  *
- * This allows visualizations to focus purely on rendering without
- * worrying about data timing and state management.
+ * Block transitions are now triggered by the block:update stream,
+ * not by detecting slot changes in trades.
  */
 export class DataProcessor {
   private currentSlot: number = 0;
-  private slotChangeTime: number = 0;
-  private gracePeriodMs: number = 50; // Buffer new slot particles before sweeping old block
-  private inGracePeriod: boolean = false;
-  private pendingSlot: number = 0;
-  private tradeBuffer: TradeMessage[] = [];
 
   // Top programs/tokens tracking (available immediately for visualizations)
   private programVolumes: Map<string, number> = new Map();
   private tokenVolumes: Map<string, number> = new Map();
   private maxTracked: number = 25; // Track top 25 of each
 
+  // Block data tracking (from block:update stream)
+  private currentBlock: BlockMessage | null = null;
+  private previousBlock: BlockMessage | null = null;
+  private blockHistory: BlockMessage[] = [];
+  private maxBlockHistory: number = 60; // Keep last 60 blocks (~24 seconds)
+
   // Callbacks for visualization
   private onTradeCallback?: (trade: TradeMessage, slot: number) => void;
   private onBlockCompleteCallback?: (blockData: BlockData, oldSlot: number, newSlot: number) => void;
-  private onGracePeriodEndCallback?: (oldSlot: number, newSlot: number, bufferedTrades: TradeMessage[]) => void;
+  private onBlockDataCallback?: (block: BlockMessage) => void;
 
-  constructor(gracePeriodMs: number = 50) {
-    this.gracePeriodMs = gracePeriodMs;
+  constructor() {
+    // No grace period needed anymore
   }
 
   /**
@@ -43,25 +42,78 @@ export class DataProcessor {
 
   /**
    * Register callback for when a block is completed
+   * Now triggered by block:update stream, not slot detection
    */
   onBlockComplete(callback: (blockData: BlockData, oldSlot: number, newSlot: number) => void) {
     this.onBlockCompleteCallback = callback;
   }
 
   /**
-   * Register callback for when grace period ends
-   * Provides: oldSlot, newSlot, and array of buffered trades to spawn
+   * Register callback for when block data arrives
+   * Provides rich block metrics for Volume & Revenue scaling
    */
-  onGracePeriodEnd(callback: (oldSlot: number, newSlot: number, bufferedTrades: TradeMessage[]) => void) {
-    this.onGracePeriodEndCallback = callback;
+  onBlockData(callback: (block: BlockMessage) => void) {
+    this.onBlockDataCallback = callback;
+  }
+
+  /**
+   * Process incoming block message from block:update stream
+   * This is now the SOURCE OF TRUTH for block completion
+   */
+  processBlock(block: BlockMessage) {
+    // Store previous block for transition
+    this.previousBlock = this.currentBlock;
+    const oldSlot = this.previousBlock?.slot || 0;
+
+    // Update current block
+    this.currentBlock = block;
+    this.currentSlot = block.slot;
+
+    // Add to history (newest first)
+    this.blockHistory.unshift(block);
+
+    // Trim history if needed
+    if (this.blockHistory.length > this.maxBlockHistory) {
+      this.blockHistory.pop();
+    }
+
+    // Fire block complete callback (triggers visualization sweep)
+    if (this.onBlockCompleteCallback && oldSlot > 0) {
+      const blockData: BlockData = {
+        slot: block.slot,
+        trades: block.swapCount || 0,
+        volume: block.swapVolumeUsd || 0,
+        timestamp: Date.now(),
+        particles: [],
+      };
+      this.onBlockCompleteCallback(blockData, oldSlot, block.slot);
+    }
+
+    // Fire block data callback (for rich metrics)
+    if (this.onBlockDataCallback) {
+      this.onBlockDataCallback(block);
+    }
+  }
+
+  /**
+   * Get current block data
+   */
+  getCurrentBlock(): BlockMessage | null {
+    return this.currentBlock;
+  }
+
+  /**
+   * Get block history (newest first)
+   */
+  getBlockHistory(): BlockMessage[] {
+    return this.blockHistory;
   }
 
   /**
    * Process incoming trade message
+   * Simplified: just track volumes and forward to visualization
    */
   processTrade(trade: TradeMessage) {
-    const now = Date.now();
-
     // Track program and token volumes
     this.programVolumes.set(trade.p, (this.programVolumes.get(trade.p) || 0) + trade.vu);
     // Track both token_a and token_b volumes
@@ -72,48 +124,12 @@ export class DataProcessor {
       this.tokenVolumes.set(trade.tb, (this.tokenVolumes.get(trade.tb) || 0) + trade.vu / 2);
     }
 
-    // FIRST TRADE EVER: Initialize current slot
+    // Update current slot from trade if we don't have block data yet
     if (this.currentSlot === 0) {
-      console.log(`🎬 First trade! Initializing slot ${trade.s}`);
       this.currentSlot = trade.s;
-      this.slotChangeTime = now;
-
-      // Spawn first trade immediately
-      if (this.onTradeCallback) {
-        this.onTradeCallback(trade, trade.s);
-      }
-      return;
     }
 
-    // Check for slot change
-    if (trade.s !== this.currentSlot && !this.inGracePeriod) {
-      // New slot detected! Start grace period
-      console.log(`🔄 Slot change detected: ${this.currentSlot} → ${trade.s}, starting ${this.gracePeriodMs}ms grace period`);
-
-      this.inGracePeriod = true;
-      this.pendingSlot = trade.s;
-      this.slotChangeTime = now;
-
-      // Buffer this trade instead of spawning it
-      this.tradeBuffer.push(trade);
-      return;
-    }
-
-    // During grace period: buffer new slot trades, spawn old slot trades
-    if (this.inGracePeriod) {
-      if (trade.s === this.pendingSlot) {
-        // Buffer new slot trades
-        this.tradeBuffer.push(trade);
-      } else if (trade.s === this.currentSlot) {
-        // Spawn old slot trades immediately (stragglers)
-        if (this.onTradeCallback) {
-          this.onTradeCallback(trade, trade.s);
-        }
-      }
-      return;
-    }
-
-    // Normal operation: spawn particle immediately
+    // Forward trade to visualization immediately
     if (this.onTradeCallback) {
       this.onTradeCallback(trade, trade.s);
     }
@@ -121,28 +137,10 @@ export class DataProcessor {
 
   /**
    * Update method to be called every frame
-   * Handles grace period expiration
+   * No longer needed for grace period logic, but kept for potential future use
    */
   update(deltaTime: number) {
-    // Check if grace period expired
-    const now = Date.now();
-    if (this.inGracePeriod && (now - this.slotChangeTime) >= this.gracePeriodMs) {
-      console.log(`⏱️ Grace period ended, transitioning ${this.currentSlot} → ${this.pendingSlot}, spawning ${this.tradeBuffer.length} buffered trades`);
-
-      const oldSlot = this.currentSlot;
-      const newSlot = this.pendingSlot;
-      const bufferedTrades = [...this.tradeBuffer]; // Copy for callback
-
-      // Notify about grace period end
-      if (this.onGracePeriodEndCallback) {
-        this.onGracePeriodEndCallback(oldSlot, newSlot, bufferedTrades);
-      }
-
-      // Clear buffer and update state
-      this.tradeBuffer = [];
-      this.currentSlot = this.pendingSlot;
-      this.inGracePeriod = false;
-    }
+    // No-op now that grace period is removed
   }
 
   /**
@@ -150,34 +148,6 @@ export class DataProcessor {
    */
   getCurrentSlot(): number {
     return this.currentSlot;
-  }
-
-  /**
-   * Get pending slot number (if in grace period)
-   */
-  getPendingSlot(): number {
-    return this.pendingSlot;
-  }
-
-  /**
-   * Check if currently in grace period
-   */
-  isInGracePeriod(): boolean {
-    return this.inGracePeriod;
-  }
-
-  /**
-   * Get number of buffered trades
-   */
-  getBufferedTradeCount(): number {
-    return this.tradeBuffer.length;
-  }
-
-  /**
-   * Set grace period duration
-   */
-  setGracePeriod(ms: number) {
-    this.gracePeriodMs = ms;
   }
 
   /**

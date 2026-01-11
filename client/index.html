@@ -126,6 +126,23 @@
       font-weight: bold;
     }
 
+    .stat-row .value.truncate {
+      max-width: 100px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .panel-section {
+      margin-bottom: 15px;
+      padding-bottom: 10px;
+      border-bottom: 1px solid rgba(139, 92, 246, 0.2);
+    }
+
+    .panel-section:last-of-type {
+      border-bottom: none;
+    }
+
     .block-progress {
       margin-top: 15px;
     }
@@ -377,10 +394,26 @@
   <div id="canvas-container"></div>
 
   <div id="hud">
-    <!-- Top Bar -->
+    <!-- Top KPI Bar -->
     <div class="top-bar">
       <div class="title">SOLANA BLOCKS LIVE</div>
       <div class="stats">
+        <div class="stat">
+          <div class="stat-label">Volume</div>
+          <div class="stat-value" id="kpi-volume" style="color: #00CED1;">$0</div>
+        </div>
+        <div class="stat">
+          <div class="stat-label">Revenue</div>
+          <div class="stat-value" id="kpi-revenue" style="color: #FFD700;">0 SOL</div>
+        </div>
+        <div class="stat">
+          <div class="stat-label">TPS</div>
+          <div class="stat-value" id="kpi-tps">0</div>
+        </div>
+        <div class="stat">
+          <div class="stat-label">Complete</div>
+          <div class="stat-value" id="kpi-complete">0%</div>
+        </div>
         <div class="stat">
           <div class="stat-label">Slot</div>
           <div class="stat-value" id="current-slot">-</div>
@@ -398,24 +431,180 @@
 
     <!-- Left Panel -->
     <div class="left-panel">
-      <div class="panel-title">Last Complete Block</div>
-      <div class="stat-row">
-        <span class="label">Slot</span>
-        <span class="value" id="block-slot">-</span>
+      <!-- Block Info Section -->
+      <div class="panel-section">
+        <div class="panel-title">Block Info</div>
+        <div class="stat-row">
+          <span class="label">Slot</span>
+          <span class="value" id="block-slot">-</span>
+        </div>
+        <div class="stat-row">
+          <span class="label">Leader</span>
+          <span class="value truncate" id="block-leader" title="">-</span>
+        </div>
+        <div class="stat-row">
+          <span class="label">Epoch</span>
+          <span class="value" id="block-epoch">-</span>
+        </div>
       </div>
-      <div class="stat-row">
-        <span class="label">Trades</span>
-        <span class="value" id="block-trades">0</span>
+
+      <!-- Transactions Section -->
+      <div class="panel-section">
+        <div class="panel-title">Transactions</div>
+        <div class="stat-row">
+          <span class="label">Total</span>
+          <span class="value" id="block-txns">0</span>
+        </div>
+        <div class="stat-row">
+          <span class="label">Votes</span>
+          <span class="value" id="block-votes" style="color: #FFD700;">0</span>
+        </div>
+        <div class="stat-row">
+          <span class="label">Completed</span>
+          <span class="value" id="block-completed" style="color: #00CED1;">0</span>
+        </div>
+        <div class="stat-row">
+          <span class="label">Reverted</span>
+          <span class="value" id="block-reverted" style="color: #FFA500;">0</span>
+        </div>
       </div>
-      <div class="stat-row">
-        <span class="label">Volume</span>
-        <span class="value" id="block-volume">$0</span>
+
+      <!-- Compute Units Section -->
+      <div class="panel-section">
+        <div class="panel-title">Compute Units</div>
+        <div class="stat-row">
+          <span class="label">Total CU</span>
+          <span class="value" id="block-cu">0</span>
+        </div>
+        <div class="stat-row">
+          <span class="label">Completed CU</span>
+          <span class="value" id="block-completed-cu" style="color: #00CED1;">0</span>
+        </div>
+        <div class="stat-row">
+          <span class="label">Reverted CU</span>
+          <span class="value" id="block-reverted-cu" style="color: #FFA500;">0</span>
+        </div>
+        <div class="stat-row">
+          <span class="label">Avg CU/tx</span>
+          <span class="value" id="block-avg-cu">0</span>
+        </div>
       </div>
-      <div class="stat-row">
-        <span class="label">Avg Trade</span>
-        <span class="value" id="block-avg">$0</span>
+
+      <!-- Fees Section -->
+      <div class="panel-section">
+        <div class="panel-title">Fees</div>
+        <div class="stat-row">
+          <span class="label">Total Fees</span>
+          <span class="value" id="block-fees">0 SOL</span>
+        </div>
+        <div class="stat-row">
+          <span class="label">Priority</span>
+          <span class="value" id="block-priority-fees">0 SOL</span>
+        </div>
+        <div class="stat-row">
+          <span class="label">Rewards</span>
+          <span class="value" id="block-rewards">0 SOL</span>
+        </div>
+        <div class="stat-row">
+          <span class="label">Avg Fee</span>
+          <span class="value" id="block-avg-fee">0</span>
+        </div>
       </div>
-      <div class="block-progress">
+
+      <!-- MEV/Jito Section -->
+      <div class="panel-section">
+        <div class="panel-title">MEV / Jito</div>
+        <div class="stat-row">
+          <span class="label">Jito Txns</span>
+          <span class="value" id="block-jito-txns" style="color: #FF8C00;">0</span>
+        </div>
+        <div class="stat-row">
+          <span class="label">Total Tips</span>
+          <span class="value" id="block-jito-total" style="color: #FF8C00;">0 SOL</span>
+        </div>
+        <div class="stat-row">
+          <span class="label">Avg Tip</span>
+          <span class="value" id="block-jito-avg">0</span>
+        </div>
+        <div class="stat-row">
+          <span class="label">Max Priority</span>
+          <span class="value" id="block-priority-max">0</span>
+        </div>
+      </div>
+
+      <!-- Trading Activity Section -->
+      <div class="panel-section">
+        <div class="panel-title">Trading Activity</div>
+        <div class="stat-row">
+          <span class="label">Swap Txns</span>
+          <span class="value" id="block-swap-txns">0</span>
+        </div>
+        <div class="stat-row">
+          <span class="label">Swaps</span>
+          <span class="value" id="block-swap-count">0</span>
+        </div>
+        <div class="stat-row">
+          <span class="label">Volume</span>
+          <span class="value" id="block-volume" style="color: #00CED1;">$0</span>
+        </div>
+        <div class="stat-row">
+          <span class="label">Traders</span>
+          <span class="value" id="block-traders">0</span>
+        </div>
+        <div class="stat-row">
+          <span class="label">Pools</span>
+          <span class="value" id="block-pools">0</span>
+        </div>
+        <div class="stat-row">
+          <span class="label">Tokens</span>
+          <span class="value" id="block-tokens">0</span>
+        </div>
+      </div>
+
+      <!-- Transfers Section -->
+      <div class="panel-section">
+        <div class="panel-title">Transfers</div>
+        <div class="stat-row">
+          <span class="label">Transfer Txns</span>
+          <span class="value" id="block-transfer-txns">0</span>
+        </div>
+        <div class="stat-row">
+          <span class="label">Transfers</span>
+          <span class="value" id="block-transfer-count">0</span>
+        </div>
+        <div class="stat-row">
+          <span class="label">Volume</span>
+          <span class="value" id="block-transfer-volume" style="color: #00CED1;">$0</span>
+        </div>
+      </div>
+
+      <!-- Network Activity Section -->
+      <div class="panel-section">
+        <div class="panel-title">Network Activity</div>
+        <div class="stat-row">
+          <span class="label">Unique Accounts</span>
+          <span class="value" id="block-accounts">0</span>
+        </div>
+        <div class="stat-row">
+          <span class="label">Unique Programs</span>
+          <span class="value" id="block-programs">0</span>
+        </div>
+        <div class="stat-row">
+          <span class="label">Unique Signers</span>
+          <span class="value" id="block-signers">0</span>
+        </div>
+        <div class="stat-row">
+          <span class="label">Instructions</span>
+          <span class="value" id="block-instructions">0</span>
+        </div>
+        <div class="stat-row">
+          <span class="label">Avg CPI Depth</span>
+          <span class="value" id="block-cpi-depth">0</span>
+        </div>
+      </div>
+
+      <!-- Block Progress -->
+      <div class="panel-section">
         <div class="panel-title">Block Progress</div>
         <div class="progress-bar">
           <div class="progress-fill" id="progress-fill" style="width: 0%"></div>
@@ -424,8 +613,8 @@
 
       <!-- Block Log -->
       <div class="block-log-container">
-        <div class="panel-title" style="margin-top: 20px; margin-bottom: 10px;">Block Log</div>
-        <div class="block-log-header">Slot      Trades      $Vol</div>
+        <div class="panel-title" style="margin-top: 10px; margin-bottom: 10px;">Block Log</div>
+        <div class="block-log-header">Slot      Txns   Rev  Vol</div>
         <div id="block-log" class="block-log"></div>
       </div>
     </div>
@@ -445,11 +634,11 @@
     <!-- Bottom Panel -->
     <div class="bottom-panel">
       <div class="chart-container">
-        <div class="chart-title">Volume (60s)</div>
+        <div class="chart-title" id="volume-chart-title">Volume (60 blocks)</div>
         <svg id="volume-chart" width="100%" height="100%"></svg>
       </div>
       <div class="chart-container">
-        <div class="chart-title">Swaps Per Second</div>
+        <div class="chart-title" id="revenue-chart-title">Revenue (60 blocks)</div>
         <svg id="sps-chart" width="100%" height="100%"></svg>
       </div>
     </div>
@@ -459,7 +648,7 @@
 
     <!-- Controls -->
     <div class="controls">
-      <div><kbd>1-5</kbd> Particle Shape</div>
+      <div><kbd>1-5</kbd> Particle Shape <kbd>G</kbd> Toggle Votes</div>
       <div><kbd>F</kbd> Free Mode <kbd>P</kbd> Program <kbd>T</kbd> Token <kbd>V</kbd> Volume</div>
       <div><kbd>+/-</kbd> Particle Size <kbd>L</kbd> Leaderboard <kbd>C</kbd> Chart Mode</div>
       <div><kbd>[/]</kbd> Switch Scene <kbd>A</kbd> Auto-cycle</div>
