@@ -126,6 +126,9 @@ redisSubscriber.onTrade((rawTrade) => {
     tradesPerSlot.set(slot, []);
   }
   tradesPerSlot.get(slot)!.push(trade);
+
+  // Debug: log trade accumulation
+  console.log(`TRADE slot=${slot} | accumulated=${tradesPerSlot.get(slot)!.length}`);
 });
 
 // Transform raw Redis block data into BlockMessage format
@@ -216,8 +219,9 @@ redisSubscriber.onBlock((rawBlock) => {
   const trades = tradesPerSlot.get(slot) || [];
   const blockMessage = transformBlockData(rawBlock, trades);
 
-  // Diagnostic log
-  console.log(`BLOCK ${slot} | gap: ${blockGap}ms | trades: ${trades.length}/${rawBlock.swap_count}`);
+  // Diagnostic log - show what slots we have trades for
+  const trackedSlots = Array.from(tradesPerSlot.keys()).sort((a, b) => b - a).slice(0, 5);
+  console.log(`BLOCK ${slot} | gap: ${blockGap}ms | trades: ${trades.length}/${rawBlock.swap_count} | tracked slots: [${trackedSlots.join(', ')}]`);
 
   // Clean up old slots (keep last 10)
   if (tradesPerSlot.size > 20) {
