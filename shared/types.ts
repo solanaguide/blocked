@@ -124,6 +124,9 @@ export interface BlockMessage {
   totalInstructions: number;
   totalInnerInstructions: number;
   avgCpiDepth: number;
+
+  // Trades bundled with block (optional, populated by server)
+  trades?: TradeMessage[];
 }
 
 export type WSMessage = BatchMessage | StatsMessage | BlockCompleteMessage | BlockMessage;

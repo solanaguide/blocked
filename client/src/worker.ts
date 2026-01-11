@@ -8,7 +8,7 @@ let wsUrl: string | null = null;
 
 // Determine WebSocket URL
 function getWsUrl(): string {
-  // Check for explicit WS URL in query params or global config
+  // Check for explicit WS URL in query params
   // This allows the embedding page to specify: ?ws=wss://live.example.com/ws
   const params = new URLSearchParams(self.location.search);
   const explicitUrl = params.get('ws');
@@ -16,7 +16,12 @@ function getWsUrl(): string {
     return explicitUrl;
   }
 
-  // Default: same host, /ws path (works when served from same origin)
+  // Development: connect to production WS server
+  if (self.location.hostname === 'localhost' || self.location.hostname === '127.0.0.1') {
+    return 'wss://live.solanacompass.com/ws';
+  }
+
+  // Production: same host, /ws path
   const protocol = self.location.protocol === 'https:' ? 'wss:' : 'ws:';
   return `${protocol}//${self.location.host}/ws`;
 }

@@ -3,16 +3,14 @@ import cors from 'cors';
 import { WebSocketServer, WebSocket } from 'ws';
 import { createServer } from 'http';
 import { RedisSubscriber } from './redis-client.js';
-import { MessageProcessor } from './message-processor.js';
 import { config } from './config.js';
-import type { BlockMessage } from '../shared/types.js';
+import type { BlockMessage, TradeMessage } from '../shared/types.js';
 
 const app = express();
 const server = createServer(app);
 const wss = new WebSocketServer({ server, path: '/ws' });
 
 const redisSubscriber = new RedisSubscriber();
-const messageProcessor = new MessageProcessor();
 
 const clients = new Set<WebSocket>();
 let redisConnected = false;
@@ -68,20 +66,70 @@ function broadcast(message: any) {
   });
 }
 
-// Setup Redis subscriber - timing diagnostics
+// Trade accumulator - collect trades per slot, send with block
 let lastBlockTime = Date.now();
-let lastBlockSlot = 0;
-const tradesPerSlot: Map<number, number> = new Map();
+const tradesPerSlot: Map<number, TradeMessage[]> = new Map();
+
+// Shorten program IDs for common ones
+function shortenProgramId(id: string): string {
+  const map: Record<string, string> = {
+    'JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4': 'JUP',
+    'CAMMCzo5YL8w4VFF8KVHrK22GGUsp5VTaW7grrKgrWqK': 'RAYDIUM_CLMM',
+    '6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P': 'RAYDIUM_CP',
+    'whirLbMiicVdio4qvUfM5KAg6Ct8VwpYzGff3uctyCc': 'ORCA',
+    'PhoeNiXZ8ByJGLkxNfZRnkUfjvmuYqLR89jjFHGqdXY': 'PHOENIX',
+    'cpamdpZCGKUy5JxQXB4dcpGPiikHawvSWAd6mEn1sGG': 'RAYDIUM_CPMM',
+    'LanMV9sAd7wArD4vJFi2qDdfnVhFxYSUg6eADduJ3uj': 'LIFINITY',
+  };
+  return map[id] || id.slice(0, 8);
+}
+
+// Shorten token mints
+function shortenMint(mint: string): string {
+  const map: Record<string, string> = {
+    'So11111111111111111111111111111111111111112': 'SOL',
+    'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v': 'USDC',
+    'Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB': 'USDT',
+  };
+  return map[mint] || mint.slice(0, 8);
+}
+
+// Process raw trade into compact format
+function processRawTrade(raw: any): TradeMessage {
+  const volumeUsd = (raw.token_a.amount / Math.pow(10, raw.token_a.decimals)) *
+                    (raw.token_a.price_usd / 1e12);
+
+  const trade: TradeMessage = {
+    s: raw.slot,
+    t: new Date(raw['@timestamp']).getTime(),
+    sig: raw.signature.slice(0, 8),
+    ta: shortenMint(raw.token_a.id),
+    tb: shortenMint(raw.token_b.id),
+    aa: raw.token_a.amount.toString(),
+    ab: raw.token_b.amount.toString(),
+    vu: volumeUsd,
+    p: shortenProgramId(raw.program_id),
+  };
+
+  if (raw.parent_program_id) {
+    trade.pp = shortenProgramId(raw.parent_program_id);
+  }
+
+  return trade;
+}
 
 redisSubscriber.onTrade((rawTrade) => {
   const slot = rawTrade.slot;
-  tradesPerSlot.set(slot, (tradesPerSlot.get(slot) || 0) + 1);
-  const trade = messageProcessor.processRawTrade(rawTrade);
-  messageProcessor.addTrade(trade);
+  const trade = processRawTrade(rawTrade);
+
+  if (!tradesPerSlot.has(slot)) {
+    tradesPerSlot.set(slot, []);
+  }
+  tradesPerSlot.get(slot)!.push(trade);
 });
 
 // Transform raw Redis block data into BlockMessage format
-function transformBlockData(raw: any): BlockMessage {
+function transformBlockData(raw: any, trades: TradeMessage[]): BlockMessage {
   return {
     type: 'block',
 
@@ -93,7 +141,7 @@ function transformBlockData(raw: any): BlockMessage {
     epoch: raw.epoch,
     leader: raw.leader,
 
-    // Transaction counts (rename success/failed to completed/reverted)
+    // Transaction counts
     txns: raw.txns,
     votes: raw.votes,
     completed: raw.success,
@@ -130,7 +178,7 @@ function transformBlockData(raw: any): BlockMessage {
     priorityMax: raw.priority_max,
     dualTipTxns: raw.dual_tip_transactions,
 
-    // Swaps - convert from micro-USD (divide by 1e12) to USD
+    // Swaps
     swapTxns: raw.swap_txns,
     swapCount: raw.swap_count,
     swapVolumeUsd: raw.swap_volume_usd / 1e12,
@@ -138,7 +186,7 @@ function transformBlockData(raw: any): BlockMessage {
     uniquePools: raw.unique_pools,
     uniqueTokens: raw.unique_tokens,
 
-    // Transfers - convert from micro-USD to USD
+    // Transfers
     transferTxns: raw.transfer_txns,
     transferCount: raw.transfer_count,
     transferVolumeUsd: raw.transfer_volume_usd / 1e12,
@@ -153,6 +201,9 @@ function transformBlockData(raw: any): BlockMessage {
     totalInstructions: raw.total_instructions,
     totalInnerInstructions: raw.total_inner_instructions,
     avgCpiDepth: raw.avg_cpi_depth,
+
+    // Bundled trades
+    trades,
   };
 }
 
@@ -160,11 +211,13 @@ redisSubscriber.onBlock((rawBlock) => {
   const now = Date.now();
   const blockGap = now - lastBlockTime;
   const slot = rawBlock.slot;
-  const tradesReceived = tradesPerSlot.get(slot) || 0;
-  const blockMessage = transformBlockData(rawBlock);
 
-  // Diagnostic: block timing and trade alignment
-  console.log(`BLOCK ${slot} | gap: ${blockGap}ms | trades: ${tradesReceived}/${rawBlock.swap_count} | delta: ${tradesReceived - rawBlock.swap_count}`);
+  // Get accumulated trades for this slot
+  const trades = tradesPerSlot.get(slot) || [];
+  const blockMessage = transformBlockData(rawBlock, trades);
+
+  // Diagnostic log
+  console.log(`BLOCK ${slot} | gap: ${blockGap}ms | trades: ${trades.length}/${rawBlock.swap_count}`);
 
   // Clean up old slots (keep last 10)
   if (tradesPerSlot.size > 20) {
@@ -175,28 +228,8 @@ redisSubscriber.onBlock((rawBlock) => {
   }
 
   lastBlockTime = now;
-  lastBlockSlot = slot;
   broadcast(blockMessage);
 });
-
-// Batch sender - sends every N ms
-setInterval(() => {
-  const { batch, blockComplete } = messageProcessor.getBatch();
-
-  if (batch.batch.length > 0) {
-    broadcast(batch);
-  }
-
-  if (blockComplete) {
-    broadcast(blockComplete);
-  }
-}, config.websocket.batchInterval);
-
-// Stats sender - sends every 1s
-setInterval(() => {
-  const stats = messageProcessor.getStats();
-  broadcast(stats);
-}, 1000);
 
 // Start server
 async function start() {

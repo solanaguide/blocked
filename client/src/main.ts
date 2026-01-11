@@ -14,12 +14,12 @@ import { TradeStream } from './visualizations/TradeStream';
 import { NyanTrade } from './visualizations/NyanTrade';
 import { ECGMonitor } from './visualizations/ECGMonitor';
 import { HUD } from './hud/HUD';
-import type { WSMessage, BatchMessage, BlockCompleteMessage, StatsMessage, BlockMessage } from '../../shared/types';
+import type { WSMessage, BlockMessage } from '../../shared/types';
 import type { FocusMode, ParticleShape } from './types';
 
 // Initialize DataProcessor and SceneManager
 const container = document.getElementById('canvas-container')!;
-const dataProcessor = new DataProcessor(); // Block transitions now driven by block:update stream
+const dataProcessor = new DataProcessor();
 const sceneManager = new SceneManager(container, dataProcessor);
 const hud = new HUD();
 
@@ -53,8 +53,6 @@ let currentShape: ParticleShape = 'cube';
 let tradesThisSecond = 0;
 let volumeThisSecond = 0;
 let lastTpsUpdate = Date.now();
-let leaderboardMode: 'window' | 'block' = 'block'; // Toggle between 60s window and last block
-let chartMode: 'persecond' | 'perblock' = 'persecond'; // Toggle between per-second and per-block charts
 
 // Handle worker messages
 worker.onmessage = (event) => {
@@ -74,84 +72,45 @@ worker.onmessage = (event) => {
 };
 
 function handleWSMessage(message: WSMessage) {
-  if (message.type === 'trades') {
-    const batch = message as BatchMessage;
+  // Now we only handle 'block' messages - trades are bundled inside
+  if (message.type === 'block') {
+    const block = message as BlockMessage;
 
-    // Process trades through DataProcessor
-    for (const trade of batch.batch) {
-      dataProcessor.processTrade(trade);
-      tradesThisSecond++;
-      volumeThisSecond += trade.vu;
+    // Process bundled trades
+    if (block.trades && block.trades.length > 0) {
+      for (const trade of block.trades) {
+        dataProcessor.processTrade(trade);
+        tradesThisSecond++;
+        volumeThisSecond += trade.vu;
 
-      // Show notification for mega trades
-      if (trade.vu > 1000000) {
-        hud.showNotification(
-          `🔥 Mega Trade: $${(trade.vu).toFixed(2)}`,
-          3000
-        );
+        // Show notification for mega trades
+        if (trade.vu > 1000000) {
+          hud.showNotification(
+            `Mega Trade: $${(trade.vu / 1000000).toFixed(2)}M`,
+            3000
+          );
+        }
       }
     }
 
-    // Update HUD
-    currentSlot = batch.currentSlot;
-    hud.updateCurrentSlot(currentSlot);
-    hud.updateBlockProgress(batch.blockProgress);
+    // Process block data
+    dataProcessor.processBlock(block);
+    hud.updateBlockData(block);
+    hud.updateCurrentSlot(block.slot);
+    currentSlot = block.slot;
 
-    // Update SPS and charts every second
+    // Add block log entry
+    hud.addBlockLogEntry(block.slot, block.trades?.length || 0, block.swapVolumeUsd);
+
+    // Update SPS display every second
     const now = Date.now();
     if (now - lastTpsUpdate > 1000) {
       hud.updateSPS(tradesThisSecond);
-
-      // Add per-second data point to charts
       hud.addChartDataPoint(tradesThisSecond, volumeThisSecond);
-
       tradesThisSecond = 0;
       volumeThisSecond = 0;
       lastTpsUpdate = now;
     }
-  }
-
-  if (message.type === 'block_complete') {
-    const block = message as BlockCompleteMessage;
-    hud.addBlockLogEntry(block.slot, block.trades, block.volume);
-  }
-
-  if (message.type === 'block') {
-    const block = message as BlockMessage;
-    dataProcessor.processBlock(block);
-    hud.updateBlockData(block);
-  }
-
-  if (message.type === 'stats') {
-    const stats = message as StatsMessage;
-
-    if (stats.lastBlock && stats.lastBlock.slot > 0) {
-      hud.updateBlockStats(stats.lastBlock.slot, stats.lastBlock.trades, stats.lastBlock.volume);
-    }
-
-    // Store both window and block data for toggling
-    (window as any).cachedWindowPrograms = stats.window.programs;
-    (window as any).cachedWindowTokens = stats.window.tokenVolumes;
-    (window as any).cachedBlockPrograms = stats.lastBlock.programs || {};
-    (window as any).cachedBlockTokens = stats.lastBlock.tokenVolumes || {};
-
-    updateLeaderboards();
-  }
-}
-
-// Helper to update leaderboards based on mode
-function updateLeaderboards() {
-  const windowPrograms = (window as any).cachedWindowPrograms || {};
-  const windowTokens = (window as any).cachedWindowTokens || {};
-  const blockPrograms = (window as any).cachedBlockPrograms || {};
-  const blockTokens = (window as any).cachedBlockTokens || {};
-
-  if (leaderboardMode === 'window') {
-    hud.updateProgramStats(windowPrograms, 'Top Programs (60s window)');
-    hud.updateTokenStats(windowTokens, 'Top Tokens (60s window)');
-  } else {
-    hud.updateProgramStats(blockPrograms, 'Top Programs (last block)');
-    hud.updateTokenStats(blockTokens, 'Top Tokens (last block)');
   }
 }
 
@@ -222,7 +181,7 @@ document.addEventListener('keydown', (e) => {
     hud.showNotification('Size: -', 1000);
   }
 
-  // Scene switching (NEW!)
+  // Scene switching
   if (e.key === '[') {
     sceneManager.previousScene();
     hud.showNotification(`Scene: ${sceneManager.getActiveSceneName()}`, 2000);
@@ -232,27 +191,16 @@ document.addEventListener('keydown', (e) => {
     hud.showNotification(`Scene: ${sceneManager.getActiveSceneName()}`, 2000);
   }
 
-  // Auto-cycle toggle (NEW!)
+  // Auto-cycle toggle
   if (e.key.toLowerCase() === 'a') {
     const isAutoCycling = !(sceneManager as any).autoCycle;
     sceneManager.setAutoCycle(isAutoCycling, 30000);
     hud.showNotification(isAutoCycling ? 'Auto-cycle: ON' : 'Auto-cycle: OFF', 2000);
   }
 
-  // Leaderboard mode toggle
-  if (e.key.toLowerCase() === 'l') {
-    leaderboardMode = leaderboardMode === 'window' ? 'block' : 'window';
-    const mode = leaderboardMode === 'window' ? '60s Window' : 'Last Block';
-    hud.showNotification(`Leaderboards: ${mode}`, 2000);
-    updateLeaderboards();
-  }
-
   // Chart mode toggle
   if (e.key.toLowerCase() === 'c') {
-    chartMode = chartMode === 'persecond' ? 'perblock' : 'persecond';
-    const mode = chartMode === 'persecond' ? 'Per Second' : 'Per Block';
-    hud.showNotification(`Charts: ${mode}`, 2000);
-    hud.setChartMode(chartMode);
+    hud.showNotification('Charts toggled', 2000);
   }
 
   // Vote particles toggle (G for Golden votes)
@@ -264,14 +212,6 @@ document.addEventListener('keydown', (e) => {
     }
   }
 });
-
-// Utility
-function formatNumber(num: number): string {
-  if (num >= 1e9) return (num / 1e9).toFixed(2) + 'B';
-  if (num >= 1e6) return (num / 1e6).toFixed(2) + 'M';
-  if (num >= 1e3) return (num / 1e3).toFixed(2) + 'K';
-  return num.toFixed(2);
-}
 
 // Set initial mode for BlockVisualization
 const initialScene = sceneManager.getActiveScene();
