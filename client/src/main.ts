@@ -76,6 +76,9 @@ function handleWSMessage(message: WSMessage) {
   if (message.type === 'block') {
     const block = message as BlockMessage;
 
+    // Debug: log trade count
+    console.log(`BLOCK ${block.slot} | trades: ${block.trades?.length || 0}`);
+
     // Process bundled trades
     if (block.trades && block.trades.length > 0) {
       for (const trade of block.trades) {
