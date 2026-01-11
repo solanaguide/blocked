@@ -13,7 +13,7 @@ module.exports = {
         NODE_ENV: 'production',
         REDIS_HOST: '192.168.100.2',
         REDIS_PORT: '6379',
-        WS_PORT: '3847',
+        WS_PORT: '5847',
         BATCH_INTERVAL: '50',
         CORS_ORIGINS: '*',
       },
