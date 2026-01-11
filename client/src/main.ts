@@ -76,8 +76,6 @@ function handleWSMessage(message: WSMessage) {
   if (message.type === 'block') {
     const block = message as BlockMessage;
 
-    // Debug: log trade count
-    console.log(`BLOCK ${block.slot} | trades: ${block.trades?.length || 0}`);
 
     // Process bundled trades
     if (block.trades && block.trades.length > 0) {
@@ -101,6 +99,12 @@ function handleWSMessage(message: WSMessage) {
     hud.updateBlockData(block);
     hud.updateCurrentSlot(block.slot);
     currentSlot = block.slot;
+
+    // Update top programs and tokens leaderboards
+    const programVolumes = dataProcessor.getProgramVolumes();
+    const tokenVolumes = dataProcessor.getTokenVolumes();
+    hud.updateProgramStats(Object.fromEntries(programVolumes));
+    hud.updateTokenStats(Object.fromEntries(tokenVolumes));
 
     // Add block log entry
     hud.addBlockLogEntry(block.slot, block.trades?.length || 0, block.swapVolumeUsd);
