@@ -13,6 +13,10 @@ import { StackedBars3D } from './visualizations/StackedBars3D';
 import { TradeStream } from './visualizations/TradeStream';
 import { NyanTrade } from './visualizations/NyanTrade';
 import { ECGMonitor } from './visualizations/ECGMonitor';
+import { EconomicPulse } from './visualizations/EconomicPulse';
+import { BlockStack3D } from './visualizations/BlockStack3D';
+import { RevenueTracker } from './visualizations/RevenueTracker';
+import { VolumeFlow } from './visualizations/VolumeFlow';
 import { HUD } from './hud/HUD';
 import type { WSMessage, BlockMessage } from '../../shared/types';
 import type { FocusMode, ParticleShape } from './types';
@@ -37,6 +41,10 @@ sceneManager.registerScene('stackedbars', () => new StackedBars3D());
 sceneManager.registerScene('tradestream', () => new TradeStream());
 sceneManager.registerScene('nyantrade', () => new NyanTrade());
 sceneManager.registerScene('ecg', () => new ECGMonitor());
+sceneManager.registerScene('pulse', () => new EconomicPulse());
+sceneManager.registerScene('blockstack', () => new BlockStack3D());
+sceneManager.registerScene('revenue', () => new RevenueTracker());
+sceneManager.registerScene('volumeflow', () => new VolumeFlow());
 
 // Start with blocks visualization
 sceneManager.switchScene('blocks');

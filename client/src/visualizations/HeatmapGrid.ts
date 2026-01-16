@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { BaseVisualization } from '../core/BaseVisualization';
-import { programColors, tokenColors, hashColor, volumeHeatmap } from '../utils/colors';
-import type { TradeMessage } from '../../../shared/types';
+import { programColors, tokenColors, hashColor, volumeHeatmap, txTypeColors } from '../utils/colors';
+import type { TradeMessage, BlockMessage } from '../../../shared/types';
 import type { BlockData } from '../types';
 
 /**
@@ -23,6 +23,16 @@ export class HeatmapGrid extends BaseVisualization {
   private rippleWave: number = 0;
   private rippleOrigin: { x: number; z: number } | null = null;
   private cameraAngle: number = 0;
+
+  // Block metrics for visual scaling
+  private blockVolume = 0;
+  private blockRevenue = 0;
+  private completionRate = 1.0;
+  private baseEmissiveIntensity = 0.3;
+
+  // Lighting references
+  private ambientLight!: THREE.AmbientLight;
+  private spotLight!: THREE.SpotLight;
 
   constructor() {
     super();
@@ -85,13 +95,13 @@ export class HeatmapGrid extends BaseVisualization {
     });
 
     // Lighting
-    const ambientLight = new THREE.AmbientLight(0x8b5cf6, 0.3);
-    this.scene.add(ambientLight);
+    this.ambientLight = new THREE.AmbientLight(0x8b5cf6, 0.3);
+    this.scene.add(this.ambientLight);
 
-    const spotLight = new THREE.SpotLight(0xff006e, 1);
-    spotLight.position.set(0, 50, 0);
-    spotLight.angle = Math.PI / 4;
-    this.scene.add(spotLight);
+    this.spotLight = new THREE.SpotLight(0xff006e, 1);
+    this.spotLight.position.set(0, 50, 0);
+    this.spotLight.angle = Math.PI / 4;
+    this.scene.add(this.spotLight);
   }
 
   getName(): string {
@@ -131,8 +141,8 @@ export class HeatmapGrid extends BaseVisualization {
   }
 
   onBlockComplete(blockData: BlockData, oldSlot: number, newSlot: number): void {
-    // Wave ripple effect from center
-    this.rippleWave = 1.0;
+    // Wave ripple effect from center - scaled by revenue
+    this.rippleWave = Math.min(1.5, 1.0 + this.blockRevenue * 8);
     this.rippleOrigin = { x: 0, z: 0 };
 
     // Flash grid
@@ -144,6 +154,46 @@ export class HeatmapGrid extends BaseVisualization {
       cell.trades = 0;
       cell.targetHeight = 0.1;
     });
+  }
+
+  /**
+   * Handle rich block data - scale HeatmapGrid by Volume/Revenue
+   */
+  onBlockData(block: BlockMessage): void {
+    // Volume (affects cell height scaling)
+    this.blockVolume = block.swapVolumeUsd + block.transferVolumeUsd;
+
+    // Revenue (affects glow intensity)
+    this.blockRevenue = (block.allFees + block.jitoTotal) / 1e9;
+
+    // Completion rate
+    const nonVote = block.completed + block.reverted;
+    this.completionRate = nonVote > 0 ? block.completed / nonVote : 1.0;
+
+    // Base emissive intensity from revenue
+    this.baseEmissiveIntensity = Math.min(0.8, 0.3 + this.blockRevenue * 8);
+
+    // Ambient light intensity from revenue
+    this.ambientLight.intensity = Math.min(0.6, 0.3 + this.blockRevenue * 4);
+
+    // Ambient color shifts with completion rate
+    const baseColor = new THREE.Color(0x8b5cf6);
+    const amberColor = new THREE.Color(txTypeColors.reverted);
+    baseColor.lerp(amberColor, (1 - this.completionRate) * 0.4);
+    this.ambientLight.color.copy(baseColor);
+
+    // Spotlight intensity from revenue
+    this.spotLight.intensity = Math.min(2.0, 1.0 + this.blockRevenue * 15);
+
+    // Spotlight color shifts with completion rate
+    const spotBaseColor = new THREE.Color(0xff006e);
+    spotBaseColor.lerp(amberColor, (1 - this.completionRate) * 0.3);
+    this.spotLight.color.copy(spotBaseColor);
+
+    // Grid floor color shifts with completion rate
+    const gridColor = new THREE.Color(0x8b5cf6);
+    gridColor.lerp(amberColor, (1 - this.completionRate) * 0.3);
+    (this.gridFloor.material as THREE.LineBasicMaterial).color.copy(gridColor);
   }
 
   update(deltaTime: number): void {
@@ -161,12 +211,12 @@ export class HeatmapGrid extends BaseVisualization {
       cell.mesh.scale.y = cell.currentHeight;
       cell.mesh.position.y = cell.currentHeight / 2;
 
-      // Update color based on height (heatmap)
+      // Update color based on height (heatmap) and revenue
       const intensity = Math.min(1, cell.currentHeight / 15);
       const heatColor = volumeHeatmap(cell.volume);
       (cell.mesh.material as THREE.MeshStandardMaterial).color.setHex(heatColor);
       (cell.mesh.material as THREE.MeshStandardMaterial).emissive.setHex(heatColor);
-      (cell.mesh.material as THREE.MeshStandardMaterial).emissiveIntensity = 0.3 + intensity * 0.7;
+      (cell.mesh.material as THREE.MeshStandardMaterial).emissiveIntensity = this.baseEmissiveIntensity + intensity * 0.7;
 
       // Ripple wave effect
       if (this.rippleWave > 0 && this.rippleOrigin) {

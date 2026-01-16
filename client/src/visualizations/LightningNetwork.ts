@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { BaseVisualization } from '../core/BaseVisualization';
-import { programColors } from '../utils/colors';
-import type { TradeMessage } from '../../../shared/types';
+import { programColors, txTypeColors } from '../utils/colors';
+import type { TradeMessage, BlockMessage } from '../../../shared/types';
 import type { BlockData } from '../types';
 
 /**
@@ -27,6 +27,15 @@ export class LightningNetwork extends BaseVisualization {
   private programVolumes: Map<string, number> = new Map();
   private tokenVolumes: Map<string, number> = new Map();
 
+  // Block metrics for visual scaling
+  private blockVolume = 0;
+  private blockRevenue = 0;
+  private completionRate = 1.0;
+  private boltBrightnessMultiplier = 1.0;
+
+  // Lighting references
+  private ambientLight!: THREE.AmbientLight;
+
   constructor() {
     super();
 
@@ -34,8 +43,8 @@ export class LightningNetwork extends BaseVisualization {
     this.camera.lookAt(0, 0, 0);
 
     // Ambient light
-    const ambientLight = new THREE.AmbientLight(0x8b5cf6, 0.2);
-    this.scene.add(ambientLight);
+    this.ambientLight = new THREE.AmbientLight(0x8b5cf6, 0.2);
+    this.scene.add(this.ambientLight);
 
     // Nodes are created dynamically based on trading activity
   }
@@ -226,12 +235,48 @@ export class LightningNetwork extends BaseVisualization {
   }
 
   onBlockComplete(blockData: BlockData, oldSlot: number, newSlot: number): void {
-    // Pulse all nodes simultaneously
-    this.energyPulse = 1.0;
+    // Pulse all nodes simultaneously - scaled by revenue
+    this.energyPulse = Math.min(1.5, 1.0 + this.blockRevenue * 8);
 
     this.nodes.forEach(node => {
-      node.glow.intensity = 5.0;
+      node.glow.intensity = Math.min(8, 5.0 + this.blockRevenue * 40);
       (node.wireframe.material as THREE.MeshBasicMaterial).opacity = 0.8;
+    });
+  }
+
+  /**
+   * Handle rich block data - scale LightningNetwork by Volume/Revenue
+   */
+  onBlockData(block: BlockMessage): void {
+    // Volume (affects node pulse intensity)
+    this.blockVolume = block.swapVolumeUsd + block.transferVolumeUsd;
+
+    // Revenue (affects bolt brightness and glow)
+    this.blockRevenue = (block.allFees + block.jitoTotal) / 1e9;
+
+    // Completion rate
+    const nonVote = block.completed + block.reverted;
+    this.completionRate = nonVote > 0 ? block.completed / nonVote : 1.0;
+
+    // Bolt brightness multiplier from priority fees
+    const priorityFeeIntensity = block.priorityFees / 1e9;
+    this.boltBrightnessMultiplier = Math.min(2.0, 1.0 + priorityFeeIntensity * 5);
+
+    // Ambient light intensity from revenue
+    this.ambientLight.intensity = Math.min(0.5, 0.2 + this.blockRevenue * 4);
+
+    // Ambient color shifts with completion rate
+    const baseColor = new THREE.Color(0x8b5cf6);
+    const amberColor = new THREE.Color(txTypeColors.reverted);
+    baseColor.lerp(amberColor, (1 - this.completionRate) * 0.4);
+    this.ambientLight.color.copy(baseColor);
+
+    // Update all node glow intensity based on revenue
+    const baseGlow = 1 + this.blockRevenue * 15;
+    this.nodes.forEach(node => {
+      if (node.glow.intensity < baseGlow) {
+        node.glow.intensity = baseGlow;
+      }
     });
   }
 

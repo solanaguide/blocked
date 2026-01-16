@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { BaseVisualization } from '../core/BaseVisualization';
-import { programColors } from '../utils/colors';
-import type { TradeMessage } from '../../../shared/types';
+import { programColors, txTypeColors } from '../utils/colors';
+import type { TradeMessage, BlockMessage } from '../../../shared/types';
 import type { BlockData } from '../types';
 
 /**
@@ -24,6 +24,17 @@ export class StackedBars3D extends BaseVisualization {
   private scrollSpeed = 0.15;
   private pulseIntensity = 0;
 
+  // Block metrics for visual scaling
+  private blockVolume = 0;
+  private blockRevenue = 0;  // SOL
+  private completionRate = 1.0;
+  private mevIntensity = 0;
+
+  // Lighting references for dynamic adjustment
+  private fireLight1: THREE.PointLight;
+  private fireLight2: THREE.PointLight;
+  private ambientLight: THREE.AmbientLight;
+
   constructor() {
     super();
 
@@ -31,16 +42,16 @@ export class StackedBars3D extends BaseVisualization {
     this.camera.lookAt(0, 0, 0);
 
     // Lighting for fire aesthetic
-    const ambientLight = new THREE.AmbientLight(0xff6600, 0.3);
-    this.scene.add(ambientLight);
+    this.ambientLight = new THREE.AmbientLight(0xff6600, 0.3);
+    this.scene.add(this.ambientLight);
 
-    const fireLight1 = new THREE.PointLight(0xff3300, 2, 100);
-    fireLight1.position.set(0, 20, 0);
-    this.scene.add(fireLight1);
+    this.fireLight1 = new THREE.PointLight(0xff3300, 2, 100);
+    this.fireLight1.position.set(0, 20, 0);
+    this.scene.add(this.fireLight1);
 
-    const fireLight2 = new THREE.PointLight(0xffaa00, 1.5, 80);
-    fireLight2.position.set(-20, 10, 10);
-    this.scene.add(fireLight2);
+    this.fireLight2 = new THREE.PointLight(0xffaa00, 1.5, 80);
+    this.fireLight2.position.set(-20, 10, 10);
+    this.scene.add(this.fireLight2);
 
     // Add floor grid
     const gridHelper = new THREE.GridHelper(100, 50, 0xff6600, 0x330000);
@@ -63,8 +74,50 @@ export class StackedBars3D extends BaseVisualization {
   }
 
   onBlockComplete(blockData: BlockData, oldSlot: number, newSlot: number): void {
-    // WHOOSH pulse effect
-    this.pulseIntensity = 2.0;
+    // WHOOSH pulse effect - scaled by revenue
+    this.pulseIntensity = Math.min(3.0, 1.5 + this.blockRevenue * 15);
+  }
+
+  /**
+   * Handle rich block data - scale StackedBars3D by Volume/Revenue
+   */
+  onBlockData(block: BlockMessage): void {
+    // Volume (affects bar heights)
+    this.blockVolume = block.swapVolumeUsd + block.transferVolumeUsd;
+
+    // Revenue (affects brightness/glow)
+    this.blockRevenue = (block.allFees + block.jitoTotal) / 1e9;
+
+    // Completion rate (affects color temperature)
+    const nonVote = block.completed + block.reverted;
+    this.completionRate = nonVote > 0 ? block.completed / nonVote : 1.0;
+
+    // MEV intensity
+    this.mevIntensity = nonVote > 0 ? block.jitoTxns / nonVote : 0;
+
+    // Adjust lighting based on revenue (brightness = network activity)
+    const revenueIntensity = Math.min(4, 2 + this.blockRevenue * 30);
+    this.fireLight1.intensity = revenueIntensity;
+    this.fireLight2.intensity = revenueIntensity * 0.75;
+
+    // Ambient light color shifts with completion rate
+    // High completion = orange fire, low completion = amber warning
+    const fireColor = new THREE.Color(0xff6600);
+    const amberColor = new THREE.Color(txTypeColors.reverted);
+    fireColor.lerp(amberColor, (1 - this.completionRate) * 0.6);
+    this.ambientLight.color.copy(fireColor);
+
+    // MEV intensity affects fireLight2 color (yellow → orange Jito color)
+    if (this.mevIntensity > 0.1) {
+      const baseColor = new THREE.Color(0xffaa00);
+      const jitoColor = new THREE.Color(txTypeColors.jito);
+      baseColor.lerp(jitoColor, Math.min(1, this.mevIntensity * 3));
+      this.fireLight2.color.copy(baseColor);
+    }
+
+    // Update scroll speed based on volume (more volume = faster time perception)
+    const volumeLog = Math.log10(Math.max(1000, this.blockVolume));
+    this.scrollSpeed = Math.min(0.25, 0.1 + volumeLog * 0.02);
   }
 
   update(deltaTime: number): void {

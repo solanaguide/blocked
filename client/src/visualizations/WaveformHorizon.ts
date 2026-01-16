@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { BaseVisualization } from '../core/BaseVisualization';
-import { volumeHeatmap } from '../utils/colors';
-import type { TradeMessage } from '../../../shared/types';
+import { volumeHeatmap, txTypeColors } from '../utils/colors';
+import type { TradeMessage, BlockMessage } from '../../../shared/types';
 import type { BlockData } from '../types';
 
 /**
@@ -21,6 +21,16 @@ export class WaveformHorizon extends BaseVisualization {
   // Synthwave sun
   private sun: THREE.Mesh;
   private sunGlow: THREE.PointLight;
+
+  // Block metrics for visual scaling
+  private blockVolume = 0;
+  private blockRevenue = 0;
+  private completionRate = 1.0;
+  private waveAmplitudeMultiplier = 1.0;
+
+  // Lighting references
+  private ambientLight!: THREE.AmbientLight;
+  private rimLight!: THREE.DirectionalLight;
 
   constructor() {
     super();
@@ -55,13 +65,13 @@ export class WaveformHorizon extends BaseVisualization {
     this.scene.add(this.sunGlow);
 
     // Add ambient light
-    const ambientLight = new THREE.AmbientLight(0x8b5cf6, 0.3);
-    this.scene.add(ambientLight);
+    this.ambientLight = new THREE.AmbientLight(0x8b5cf6, 0.3);
+    this.scene.add(this.ambientLight);
 
     // Add purple rim light
-    const rimLight = new THREE.DirectionalLight(0x8b5cf6, 0.5);
-    rimLight.position.set(0, 10, 10);
-    this.scene.add(rimLight);
+    this.rimLight = new THREE.DirectionalLight(0x8b5cf6, 0.5);
+    this.rimLight.position.set(0, 10, 10);
+    this.scene.add(this.rimLight);
 
     // Initialize waveform with zeros
     for (let i = 0; i < this.maxPoints; i++) {
@@ -133,19 +143,61 @@ export class WaveformHorizon extends BaseVisualization {
   }
 
   onBlockComplete(blockData: BlockData, oldSlot: number, newSlot: number): void {
-    // BASS KICK: Screen flash effect
-    this.screenFlash = 1.0;
+    // BASS KICK: Screen flash effect - scaled by revenue
+    this.screenFlash = Math.min(1.5, 1.0 + this.blockRevenue * 8);
 
-    // Pulse the sun
-    this.sunGlow.intensity = 5.0;
+    // Pulse the sun - brighter with more revenue
+    this.sunGlow.intensity = Math.min(8, 5.0 + this.blockRevenue * 40);
 
     // Flash the grid
     this.gridFloor.material.opacity = 0.9;
   }
 
+  /**
+   * Handle rich block data - scale WaveformHorizon by Volume/Revenue
+   */
+  onBlockData(block: BlockMessage): void {
+    // Volume (affects waveform amplitude)
+    this.blockVolume = block.swapVolumeUsd + block.transferVolumeUsd;
+
+    // Revenue (affects brightness and glow)
+    this.blockRevenue = (block.allFees + block.jitoTotal) / 1e9;
+
+    // Completion rate
+    const nonVote = block.completed + block.reverted;
+    this.completionRate = nonVote > 0 ? block.completed / nonVote : 1.0;
+
+    // Wave amplitude multiplier based on volume
+    const volumeLog = Math.log10(Math.max(1000, this.blockVolume));
+    this.waveAmplitudeMultiplier = Math.min(2.0, 0.8 + volumeLog * 0.15);
+
+    // Sun brightness from revenue
+    const sunMaterial = this.sun.material as THREE.MeshStandardMaterial;
+    sunMaterial.emissiveIntensity = Math.min(3.0, 1.5 + this.blockRevenue * 20);
+
+    // Sun color shifts with completion rate
+    const baseColor = new THREE.Color(0xff006e);
+    const amberColor = new THREE.Color(txTypeColors.reverted);
+    baseColor.lerp(amberColor, (1 - this.completionRate) * 0.4);
+    sunMaterial.color.copy(baseColor);
+    sunMaterial.emissive.copy(baseColor);
+    this.sunGlow.color.copy(baseColor);
+
+    // Ambient light intensity from revenue
+    this.ambientLight.intensity = Math.min(0.6, 0.3 + this.blockRevenue * 4);
+
+    // Rim light intensity from revenue
+    this.rimLight.intensity = Math.min(1.0, 0.5 + this.blockRevenue * 6);
+
+    // Grid color shifts with completion rate
+    const gridColor = new THREE.Color(0xff006e);
+    gridColor.lerp(amberColor, (1 - this.completionRate) * 0.3);
+    (this.gridFloor.material as THREE.LineBasicMaterial).color.copy(gridColor);
+  }
+
   update(deltaTime: number): void {
-    // Sample current volume into waveform every frame
-    const amplitude = Math.log10(Math.max(1, this.currentVolume)) * 1.5;
+    // Sample current volume into waveform every frame - scaled by block volume
+    const amplitude = Math.log10(Math.max(1, this.currentVolume)) * 1.5 * this.waveAmplitudeMultiplier;
 
     // Shift waveform left (older points move left)
     this.waveformPoints.shift();

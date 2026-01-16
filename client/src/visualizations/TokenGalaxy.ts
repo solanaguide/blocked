@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { BaseVisualization } from '../core/BaseVisualization';
-import { tokenColors, hashColor } from '../utils/colors';
-import type { TradeMessage } from '../../../shared/types';
+import { tokenColors, hashColor, txTypeColors } from '../utils/colors';
+import type { TradeMessage, BlockMessage } from '../../../shared/types';
 import type { BlockData } from '../types';
 
 /**
@@ -24,6 +24,12 @@ export class TokenGalaxy extends BaseVisualization {
   private cameraAngle: number = 0;
   private blockPulse: number = 0;
   private maxTokens = 25;
+
+  // Block metrics for visual scaling
+  private blockVolume = 0;
+  private blockRevenue = 0;
+  private completionRate = 1.0;
+  private orbitSpeedMultiplier = 1.0;
 
   // Major tokens get fixed orbital positions
   private majorTokens = new Map<string, number>([
@@ -209,9 +215,44 @@ export class TokenGalaxy extends BaseVisualization {
   }
 
   onBlockComplete(blockData: BlockData, oldSlot: number, newSlot: number): void {
-    // Nova burst from SOL sun
-    this.blockPulse = 2.0;
-    this.sunGlow.intensity = 15.0;
+    // Nova burst from SOL sun - scaled by revenue
+    this.blockPulse = Math.min(3.0, 2.0 + this.blockRevenue * 10);
+    this.sunGlow.intensity = Math.min(20, 15.0 + this.blockRevenue * 50);
+  }
+
+  /**
+   * Handle rich block data - scale TokenGalaxy by Volume/Revenue
+   */
+  onBlockData(block: BlockMessage): void {
+    // Volume (affects particle density perception)
+    this.blockVolume = block.swapVolumeUsd + block.transferVolumeUsd;
+
+    // Revenue (affects sun brightness/glow)
+    this.blockRevenue = (block.allFees + block.jitoTotal) / 1e9;
+
+    // Completion rate
+    const nonVote = block.completed + block.reverted;
+    this.completionRate = nonVote > 0 ? block.completed / nonVote : 1.0;
+
+    // Orbit speed multiplier based on CU (network load)
+    const cuNormalized = block.cu / 48000000; // 48M is typical max
+    this.orbitSpeedMultiplier = Math.min(2.0, 0.8 + cuNormalized * 0.8);
+
+    // Update sun emissive based on revenue (brighter = more revenue)
+    const sunMaterial = this.sun.material as THREE.MeshStandardMaterial;
+    sunMaterial.emissiveIntensity = Math.min(4.0, 2.5 + this.blockRevenue * 20);
+
+    // Sun glow intensity from revenue
+    this.sunGlow.intensity = Math.min(10, 5 + this.blockRevenue * 60);
+
+    // Shift sun color slightly based on completion rate
+    // High completion = pure purple, low completion = amber tint
+    const baseColor = new THREE.Color(0x9945ff);
+    const amberColor = new THREE.Color(txTypeColors.reverted);
+    baseColor.lerp(amberColor, (1 - this.completionRate) * 0.3);
+    sunMaterial.color.copy(baseColor);
+    sunMaterial.emissive.copy(baseColor);
+    this.sunGlow.color.copy(baseColor);
   }
 
   update(deltaTime: number): void {
@@ -223,8 +264,8 @@ export class TokenGalaxy extends BaseVisualization {
         // Age particle
         particle.age += deltaTime;
 
-        // Update orbit
-        particle.orbitAngle += particle.orbitSpeed * deltaTime * 0.001;
+        // Update orbit - speed affected by network load
+        particle.orbitAngle += particle.orbitSpeed * deltaTime * 0.001 * this.orbitSpeedMultiplier;
 
         const x = Math.cos(particle.orbitAngle) * particle.orbitRadius;
         const y = Math.sin(particle.orbitTilt) * particle.orbitRadius * 0.2;

@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { BaseVisualization } from '../core/BaseVisualization';
-import { programColors, colorToHex } from '../utils/colors';
-import type { TradeMessage } from '../../../shared/types';
+import { programColors, colorToHex, txTypeColors } from '../utils/colors';
+import type { TradeMessage, BlockMessage } from '../../../shared/types';
 import type { BlockData } from '../types';
 
 /**
@@ -21,6 +21,16 @@ export class FrequencyBars extends BaseVisualization {
   private bloomIntensity: number = 0;
   private maxBars = 10; // Show top 10 programs dynamically
 
+  // Block metrics for visual scaling
+  private blockVolume = 0;
+  private blockRevenue = 0;
+  private completionRate = 1.0;
+  private baseEmissiveIntensity = 0.5;
+
+  // Lighting references
+  private ambientLight!: THREE.AmbientLight;
+  private rimLight!: THREE.DirectionalLight;
+
   constructor() {
     super();
 
@@ -36,13 +46,13 @@ export class FrequencyBars extends BaseVisualization {
     this.scene.add(this.gridFloor);
 
     // Add purple ambient light
-    const ambientLight = new THREE.AmbientLight(0x8b5cf6, 0.4);
-    this.scene.add(ambientLight);
+    this.ambientLight = new THREE.AmbientLight(0x8b5cf6, 0.4);
+    this.scene.add(this.ambientLight);
 
     // Add rim light
-    const rimLight = new THREE.DirectionalLight(0xff006e, 0.8);
-    rimLight.position.set(-10, 10, -10);
-    this.scene.add(rimLight);
+    this.rimLight = new THREE.DirectionalLight(0xff006e, 0.8);
+    this.rimLight.position.set(-10, 10, -10);
+    this.scene.add(this.rimLight);
 
     // Bars are created dynamically as programs appear
   }
@@ -152,8 +162,8 @@ export class FrequencyBars extends BaseVisualization {
   }
 
   onBlockComplete(blockData: BlockData, oldSlot: number, newSlot: number): void {
-    // BASS KICK EFFECT: Trigger bloom pulse
-    this.bloomIntensity = 2.0;
+    // BASS KICK EFFECT: Trigger bloom pulse - scaled by revenue
+    this.bloomIntensity = Math.min(3.0, 2.0 + this.blockRevenue * 15);
 
     // Flash the grid
     this.gridFloor.material.opacity = 0.8;
@@ -164,6 +174,42 @@ export class FrequencyBars extends BaseVisualization {
       data.trades = 0;
       data.target = 0.1;
     });
+  }
+
+  /**
+   * Handle rich block data - scale FrequencyBars by Volume/Revenue
+   */
+  onBlockData(block: BlockMessage): void {
+    // Volume (affects bar target scaling)
+    this.blockVolume = block.swapVolumeUsd + block.transferVolumeUsd;
+
+    // Revenue (affects brightness/glow)
+    this.blockRevenue = (block.allFees + block.jitoTotal) / 1e9;
+
+    // Completion rate
+    const nonVote = block.completed + block.reverted;
+    this.completionRate = nonVote > 0 ? block.completed / nonVote : 1.0;
+
+    // Base emissive intensity from revenue (brighter = more fees paid)
+    this.baseEmissiveIntensity = Math.min(1.2, 0.5 + this.blockRevenue * 10);
+
+    // Ambient light intensity from revenue
+    this.ambientLight.intensity = Math.min(0.8, 0.4 + this.blockRevenue * 5);
+
+    // Rim light color shifts with completion rate
+    // High completion = pink, low completion = amber
+    const baseColor = new THREE.Color(0xff006e);
+    const amberColor = new THREE.Color(txTypeColors.reverted);
+    baseColor.lerp(amberColor, (1 - this.completionRate) * 0.5);
+    this.rimLight.color.copy(baseColor);
+
+    // Rim light intensity from revenue
+    this.rimLight.intensity = Math.min(1.5, 0.8 + this.blockRevenue * 8);
+
+    // Grid color shifts with completion rate
+    const gridColor = new THREE.Color(0x8b5cf6);
+    gridColor.lerp(amberColor, (1 - this.completionRate) * 0.3);
+    (this.gridFloor.material as THREE.LineBasicMaterial).color.copy(gridColor);
   }
 
   update(deltaTime: number): void {
@@ -192,10 +238,10 @@ export class FrequencyBars extends BaseVisualization {
       // Update wireframe
       bar.wireframe.scale.copy(bar.mesh.scale);
 
-      // Hot color based on height
+      // Hot color based on height and revenue
       const intensity = Math.min(1, bar.currentHeight / 20);
       const hotness = intensity * 0.8;
-      (bar.mesh.material as THREE.MeshStandardMaterial).emissiveIntensity = 0.3 + hotness;
+      (bar.mesh.material as THREE.MeshStandardMaterial).emissiveIntensity = this.baseEmissiveIntensity + hotness;
     });
 
     // Decay bloom effect

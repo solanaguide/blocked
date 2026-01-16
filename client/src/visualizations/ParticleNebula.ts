@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { BaseVisualization } from '../core/BaseVisualization';
-import { volumeHeatmap, programColors, hashColor } from '../utils/colors';
-import type { TradeMessage } from '../../../shared/types';
+import { volumeHeatmap, programColors, hashColor, txTypeColors } from '../utils/colors';
+import type { TradeMessage, BlockMessage } from '../../../shared/types';
 import type { BlockData } from '../types';
 
 /**
@@ -21,6 +21,13 @@ export class ParticleNebula extends BaseVisualization {
   private cameraAngle: number = 0;
   private maxParticles = 200; // Reduced from 500 for performance
   private sharedLight: THREE.PointLight; // Single light instead of per-particle
+  private ambientLight: THREE.AmbientLight;
+
+  // Block metrics for visual scaling
+  private blockVolume = 0;
+  private blockRevenue = 0;
+  private completionRate = 1.0;
+  private nebulaIntensity = 1.0; // Overall brightness multiplier
 
   constructor() {
     super();
@@ -42,8 +49,8 @@ export class ParticleNebula extends BaseVisualization {
     });
 
     // Ambient lighting
-    const ambientLight = new THREE.AmbientLight(0x8b5cf6, 0.2);
-    this.scene.add(ambientLight);
+    this.ambientLight = new THREE.AmbientLight(0x8b5cf6, 0.2);
+    this.scene.add(this.ambientLight);
 
     // Single shared light for all particles (performance optimization)
     this.sharedLight = new THREE.PointLight(0xff006e, 3, 100);
@@ -167,8 +174,37 @@ export class ParticleNebula extends BaseVisualization {
   }
 
   onBlockComplete(blockData: BlockData, oldSlot: number, newSlot: number): void {
-    // Gravitational collapse effect
-    this.gravitationalCollapse = 1.0;
+    // Gravitational collapse effect - scaled by revenue
+    this.gravitationalCollapse = Math.min(1.5, 0.8 + this.blockRevenue * 10);
+  }
+
+  /**
+   * Handle rich block data - scale ParticleNebula by Volume/Revenue
+   */
+  onBlockData(block: BlockMessage): void {
+    // Volume (affects nebula density perception)
+    this.blockVolume = block.swapVolumeUsd + block.transferVolumeUsd;
+
+    // Revenue (affects brightness)
+    this.blockRevenue = (block.allFees + block.jitoTotal) / 1e9;
+
+    // Completion rate
+    const nonVote = block.completed + block.reverted;
+    this.completionRate = nonVote > 0 ? block.completed / nonVote : 1.0;
+
+    // Calculate nebula intensity from revenue per tx
+    const revenuePerTx = block.txns > 0 ? this.blockRevenue / block.txns : 0;
+    this.nebulaIntensity = Math.min(2.0, 1.0 + revenuePerTx * 10000);
+
+    // Update shared light intensity based on revenue
+    this.sharedLight.intensity = Math.min(6, 3 + this.blockRevenue * 40);
+
+    // Ambient light color shifts with completion rate
+    const baseColor = new THREE.Color(0x8b5cf6);
+    const amberColor = new THREE.Color(txTypeColors.reverted);
+    baseColor.lerp(amberColor, (1 - this.completionRate) * 0.4);
+    this.ambientLight.color.copy(baseColor);
+    this.ambientLight.intensity = 0.2 + this.blockRevenue * 2;
   }
 
   update(deltaTime: number): void {

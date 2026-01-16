@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { BaseVisualization } from '../core/BaseVisualization';
-import { programColors } from '../utils/colors';
-import type { TradeMessage } from '../../../shared/types';
+import { programColors, txTypeColors } from '../utils/colors';
+import type { TradeMessage, BlockMessage } from '../../../shared/types';
 import type { BlockData } from '../types';
 
 /**
@@ -22,6 +22,17 @@ export class TradeStream extends BaseVisualization {
   private maxParticles = 300;
   private streamSpeed = 0.3; // Constant speed for all particles and dividers
 
+  // Block metrics for visual scaling
+  private blockVolume = 0;
+  private blockRevenue = 0;  // SOL
+  private completionRate = 1.0;
+  private mevIntensity = 0;
+
+  // Lighting references for dynamic adjustment
+  private light1: THREE.PointLight;
+  private light2: THREE.PointLight;
+  private ambientLight: THREE.AmbientLight;
+
   constructor() {
     super();
 
@@ -29,17 +40,17 @@ export class TradeStream extends BaseVisualization {
     this.camera.lookAt(0, 0, 0);
 
     // Ambient light
-    const ambientLight = new THREE.AmbientLight(0x8b5cf6, 0.4);
-    this.scene.add(ambientLight);
+    this.ambientLight = new THREE.AmbientLight(0x8b5cf6, 0.4);
+    this.scene.add(this.ambientLight);
 
     // Add some depth lighting
-    const light1 = new THREE.PointLight(0xff006e, 1, 100);
-    light1.position.set(-30, 10, 20);
-    this.scene.add(light1);
+    this.light1 = new THREE.PointLight(0xff006e, 1, 100);
+    this.light1.position.set(-30, 10, 20);
+    this.scene.add(this.light1);
 
-    const light2 = new THREE.PointLight(0x06ffa5, 1, 100);
-    light2.position.set(30, -10, 20);
-    this.scene.add(light2);
+    this.light2 = new THREE.PointLight(0x06ffa5, 1, 100);
+    this.light2.position.set(30, -10, 20);
+    this.scene.add(this.light2);
 
     // Add horizontal guide lines
     this.createGuideLines();
@@ -148,6 +159,47 @@ export class TradeStream extends BaseVisualization {
   onBlockComplete(blockData: BlockData, oldSlot: number, newSlot: number): void {
     // Create vertical divider that sweeps across screen
     this.createBlockDivider(newSlot);
+  }
+
+  /**
+   * Handle rich block data - scale TradeStream by Volume/Revenue
+   */
+  onBlockData(block: BlockMessage): void {
+    // Volume (affects stream speed)
+    this.blockVolume = block.swapVolumeUsd + block.transferVolumeUsd;
+
+    // Revenue (affects brightness/glow)
+    this.blockRevenue = (block.allFees + block.jitoTotal) / 1e9;
+
+    // Completion rate (affects color temperature)
+    const nonVote = block.completed + block.reverted;
+    this.completionRate = nonVote > 0 ? block.completed / nonVote : 1.0;
+
+    // MEV intensity
+    this.mevIntensity = nonVote > 0 ? block.jitoTxns / nonVote : 0;
+
+    // Adjust stream speed based on TPS (txns per ~400ms block)
+    this.streamSpeed = Math.min(0.6, 0.2 + (block.txns / 2000) * 0.2);
+
+    // Adjust lighting based on revenue (brightness = PMF/urgency)
+    const revenueIntensity = Math.min(3, 1 + this.blockRevenue * 20);
+    this.light1.intensity = revenueIntensity;
+    this.light2.intensity = revenueIntensity;
+
+    // Ambient light shifts color based on completion rate
+    // High completion = purple/cyan, low completion = warmer amber tint
+    const ambientColor = new THREE.Color(0x8b5cf6);
+    const amberColor = new THREE.Color(txTypeColors.reverted);
+    ambientColor.lerp(amberColor, (1 - this.completionRate) * 0.5);
+    this.ambientLight.color.copy(ambientColor);
+
+    // MEV intensity affects light2 color (green → orange)
+    if (this.mevIntensity > 0.1) {
+      const mevColor = new THREE.Color(0x06ffa5);
+      const jitoColor = new THREE.Color(txTypeColors.jito);
+      mevColor.lerp(jitoColor, Math.min(1, this.mevIntensity * 3));
+      this.light2.color.copy(mevColor);
+    }
   }
 
   private createBlockDivider(slot: number): void {

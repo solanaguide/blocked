@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { BaseVisualization } from '../core/BaseVisualization';
-import { programColors } from '../utils/colors';
-import type { TradeMessage } from '../../../shared/types';
+import { programColors, txTypeColors } from '../utils/colors';
+import type { TradeMessage, BlockMessage } from '../../../shared/types';
 import type { BlockData } from '../types';
 
 /**
@@ -23,6 +23,15 @@ export class DoubleSidedEQ extends BaseVisualization {
   private pulseIntensity: number = 0;
   private maxBars = 12;
 
+  // Block metrics for visual scaling
+  private blockVolume = 0;
+  private blockRevenue = 0;
+  private completionRate = 1.0;
+  private baseEmissiveIntensity = 0.3;
+
+  // Lighting references
+  private ambientLight!: THREE.AmbientLight;
+
   constructor() {
     super();
 
@@ -39,8 +48,8 @@ export class DoubleSidedEQ extends BaseVisualization {
     this.scene.add(this.centerLine);
 
     // Lighting
-    const ambientLight = new THREE.AmbientLight(0x8b5cf6, 0.4);
-    this.scene.add(ambientLight);
+    this.ambientLight = new THREE.AmbientLight(0x8b5cf6, 0.4);
+    this.scene.add(this.ambientLight);
   }
 
   getName(): string {
@@ -71,8 +80,8 @@ export class DoubleSidedEQ extends BaseVisualization {
   }
 
   onBlockComplete(blockData: BlockData, oldSlot: number, newSlot: number): void {
-    // Massive pulse effect
-    this.pulseIntensity = 3.0;
+    // Massive pulse effect - scaled by revenue
+    this.pulseIntensity = Math.min(5.0, 3.0 + this.blockRevenue * 20);
 
     // Reset data
     this.programData.forEach(data => {
@@ -81,6 +90,36 @@ export class DoubleSidedEQ extends BaseVisualization {
       data.targetTrades = 0.1;
       data.targetVolume = 0.1;
     });
+  }
+
+  /**
+   * Handle rich block data - scale DoubleSidedEQ by Volume/Revenue
+   */
+  onBlockData(block: BlockMessage): void {
+    // Volume (affects bar scaling)
+    this.blockVolume = block.swapVolumeUsd + block.transferVolumeUsd;
+
+    // Revenue (affects brightness/glow)
+    this.blockRevenue = (block.allFees + block.jitoTotal) / 1e9;
+
+    // Completion rate
+    const nonVote = block.completed + block.reverted;
+    this.completionRate = nonVote > 0 ? block.completed / nonVote : 1.0;
+
+    // Base emissive intensity from revenue
+    this.baseEmissiveIntensity = Math.min(0.8, 0.3 + this.blockRevenue * 8);
+
+    // Ambient light intensity from revenue
+    this.ambientLight.intensity = Math.min(0.8, 0.4 + this.blockRevenue * 5);
+
+    // Ambient color shifts with completion rate
+    const baseColor = new THREE.Color(0x8b5cf6);
+    const amberColor = new THREE.Color(txTypeColors.reverted);
+    baseColor.lerp(amberColor, (1 - this.completionRate) * 0.4);
+    this.ambientLight.color.copy(baseColor);
+
+    // Center line color shifts with completion rate
+    (this.centerLine.material as THREE.LineBasicMaterial).color.copy(baseColor);
   }
 
   update(deltaTime: number): void {
@@ -111,12 +150,12 @@ export class DoubleSidedEQ extends BaseVisualization {
       bar.bottomMesh.scale.y = bar.currentVolumeHeight;
       bar.bottomMesh.position.y = -bar.currentVolumeHeight / 2;
 
-      // Emissive intensity based on height + pulse
+      // Emissive intensity based on height + pulse + revenue
       const topIntensity = Math.min(1, bar.currentTradesHeight / 15);
       const bottomIntensity = Math.min(1, bar.currentVolumeHeight / 15);
 
-      (bar.topMesh.material as THREE.MeshStandardMaterial).emissiveIntensity = 0.3 + topIntensity * 0.7 + this.pulseIntensity * 0.3;
-      (bar.bottomMesh.material as THREE.MeshStandardMaterial).emissiveIntensity = 0.3 + bottomIntensity * 0.7 + this.pulseIntensity * 0.3;
+      (bar.topMesh.material as THREE.MeshStandardMaterial).emissiveIntensity = this.baseEmissiveIntensity + topIntensity * 0.7 + this.pulseIntensity * 0.3;
+      (bar.bottomMesh.material as THREE.MeshStandardMaterial).emissiveIntensity = this.baseEmissiveIntensity + bottomIntensity * 0.7 + this.pulseIntensity * 0.3;
     });
 
     // Decay pulse
