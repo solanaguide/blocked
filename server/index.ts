@@ -126,9 +126,6 @@ redisSubscriber.onTrade((rawTrade) => {
     tradesPerSlot.set(slot, []);
   }
   tradesPerSlot.get(slot)!.push(trade);
-
-  // Debug: log trade accumulation
-  console.log(`TRADE slot=${slot} | accumulated=${tradesPerSlot.get(slot)!.length}`);
 });
 
 // Transform raw Redis block data into BlockMessage format
