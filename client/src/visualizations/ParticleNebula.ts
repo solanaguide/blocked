@@ -5,7 +5,6 @@ import type { TradeMessage, BlockMessage } from '../../../shared/types';
 import type { BlockData } from '../types';
 import type { LegendItem } from '../hud/Legend';
 import type { DataProcessor } from '../data/DataProcessor';
-import { apiFetch } from '../utils/api';
 
 /**
  * ParticleNebula - Cloud of glowing particles in 3D space
@@ -131,7 +130,7 @@ export class ParticleNebula extends BaseVisualization {
    */
   private async preloadFromCache(): Promise<void> {
     try {
-      const response = await apiFetch('/api/network-state');
+      const response = await fetch('/api/network-state');
       if (response.ok) {
         const state = await response.json();
         this.initializeFromCache(state);
