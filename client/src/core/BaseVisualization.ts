@@ -1,9 +1,57 @@
 import * as THREE from 'three';
+import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
+import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
+import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
+import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { IVisualization, IHUDConfig } from './IVisualization';
 import type { DataProcessor } from '../data/DataProcessor';
 import type { TradeMessage, BlockMessage } from '../../../shared/types';
 import type { BlockData, FocusMode, ParticleShape } from '../types';
 import { Tooltip, type InteractiveObject } from '../utils/Tooltip';
+import type { LegendItem } from '../hud/Legend';
+
+/**
+ * Bloom configuration for visualizations
+ */
+export interface BloomConfig {
+  strength: number;
+  radius: number;
+  threshold: number;
+}
+
+/**
+ * Default bloom settings per visualization name
+ * Tuned for clarity: neon/glow effects get more bloom, data-heavy vizs get less
+ */
+const BLOOM_PRESETS: Record<string, BloomConfig> = {
+  // Neon aesthetic visualizations - higher bloom
+  'VR Tunnel': { strength: 0.8, radius: 0.4, threshold: 0.75 },
+  'Lightning Network': { strength: 0.8, radius: 0.4, threshold: 0.7 },
+  'Nyan Trade': { strength: 0.6, radius: 0.4, threshold: 0.75 },
+
+  // Data-centric visualizations - subtle bloom for readability
+  'ECG Monitor': { strength: 0.4, radius: 0.3, threshold: 0.85 },
+  'Frequency Bars': { strength: 0.4, radius: 0.3, threshold: 0.85 },
+  'Heatmap Grid': { strength: 0.3, radius: 0.25, threshold: 0.85 },
+  'Stacked Bars 3D': { strength: 0.3, radius: 0.25, threshold: 0.85 },
+  'Double-Sided EQ': { strength: 0.4, radius: 0.3, threshold: 0.8 },
+
+  // Particle/effect visualizations - moderate bloom
+  'Particle Nebula': { strength: 0.6, radius: 0.4, threshold: 0.7 },
+  'Token Galaxy': { strength: 0.7, radius: 0.4, threshold: 0.7 },
+  'Economic Pulse': { strength: 0.7, radius: 0.4, threshold: 0.75 },
+  'Trade Stream': { strength: 0.5, radius: 0.3, threshold: 0.8 },
+  'Volume Flow': { strength: 0.4, radius: 0.3, threshold: 0.8 },
+
+  // Block/structure visualizations - low bloom
+  'Block Stack 3D': { strength: 0.4, radius: 0.3, threshold: 0.85 },
+  'Block Visualization': { strength: 0.4, radius: 0.3, threshold: 0.8 },
+  'Revenue Tracker': { strength: 0.5, radius: 0.3, threshold: 0.8 },
+  'Waveform Horizon': { strength: 0.4, radius: 0.3, threshold: 0.85 },
+};
+
+// Default to subtle bloom for unlisted visualizations (clarity over prettiness)
+const DEFAULT_BLOOM: BloomConfig = { strength: 0.4, radius: 0.3, threshold: 0.85 };
 
 /**
  * Base class for all visualizations
@@ -16,6 +64,11 @@ export abstract class BaseVisualization implements IVisualization {
   protected clock: THREE.Clock;
   protected container: HTMLElement | null = null;
   protected dataProcessor: DataProcessor | null = null;
+
+  // Post-processing
+  protected composer: EffectComposer;
+  protected bloomPass: UnrealBloomPass;
+  protected bloomEnabled: boolean = true;
 
   // Interaction support
   protected tooltip: Tooltip;
@@ -46,11 +99,28 @@ export abstract class BaseVisualization implements IVisualization {
     this.renderer = new THREE.WebGLRenderer({
       antialias: true,
       alpha: true,
+      preserveDrawingBuffer: true, // Required for Playwright screenshots
     });
     this.renderer.setSize(window.innerWidth, window.innerHeight);
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
     this.renderer.toneMappingExposure = 1.2;
+
+    // Setup post-processing
+    this.composer = new EffectComposer(this.renderer);
+    this.composer.addPass(new RenderPass(this.scene, this.camera));
+
+    // Get bloom config for this visualization
+    const bloomConfig = BLOOM_PRESETS[this.getName()] || DEFAULT_BLOOM;
+
+    this.bloomPass = new UnrealBloomPass(
+      new THREE.Vector2(window.innerWidth, window.innerHeight),
+      bloomConfig.strength,
+      bloomConfig.radius,
+      bloomConfig.threshold
+    );
+    this.composer.addPass(this.bloomPass);
+    this.composer.addPass(new OutputPass());
 
     // Setup clock
     this.clock = new THREE.Clock();
@@ -113,6 +183,9 @@ export abstract class BaseVisualization implements IVisualization {
     this.tooltip.dispose();
     this.interactiveObjects = [];
 
+    // Dispose post-processing
+    this.composer.dispose();
+
     // Dispose renderer
     this.renderer.dispose();
 
@@ -148,13 +221,50 @@ export abstract class BaseVisualization implements IVisualization {
     this.camera.aspect = window.innerWidth / window.innerHeight;
     this.camera.updateProjectionMatrix();
     this.renderer.setSize(window.innerWidth, window.innerHeight);
+    this.composer.setSize(window.innerWidth, window.innerHeight);
+    this.bloomPass.resolution.set(window.innerWidth, window.innerHeight);
   }
 
   /**
    * Render the scene (called by SceneManager after update)
    */
   render(): void {
-    this.renderer.render(this.scene, this.camera);
+    if (this.bloomEnabled) {
+      this.composer.render();
+    } else {
+      this.renderer.render(this.scene, this.camera);
+    }
+  }
+
+  /**
+   * Toggle bloom effect on/off
+   */
+  toggleBloom(): boolean {
+    this.bloomEnabled = !this.bloomEnabled;
+    return this.bloomEnabled;
+  }
+
+  /**
+   * Set bloom enabled state
+   */
+  setBloomEnabled(enabled: boolean): void {
+    this.bloomEnabled = enabled;
+  }
+
+  /**
+   * Get bloom enabled state
+   */
+  isBloomEnabled(): boolean {
+    return this.bloomEnabled;
+  }
+
+  /**
+   * Update bloom parameters
+   */
+  setBloomParams(strength?: number, radius?: number, threshold?: number): void {
+    if (strength !== undefined) this.bloomPass.strength = strength;
+    if (radius !== undefined) this.bloomPass.radius = radius;
+    if (threshold !== undefined) this.bloomPass.threshold = threshold;
   }
 
   /**
@@ -243,4 +353,13 @@ export abstract class BaseVisualization implements IVisualization {
    * for multi-dimensional scaling
    */
   onBlockData?(block: BlockMessage): void;
+
+  /**
+   * Get legend items explaining this visualization's visual language.
+   * Subclasses should override this to provide meaningful legend content.
+   */
+  getLegend(): LegendItem[] {
+    // Default empty legend - subclasses should override
+    return [];
+  }
 }

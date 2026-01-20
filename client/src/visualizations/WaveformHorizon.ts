@@ -3,6 +3,7 @@ import { BaseVisualization } from '../core/BaseVisualization';
 import { volumeHeatmap, txTypeColors } from '../utils/colors';
 import type { TradeMessage, BlockMessage } from '../../../shared/types';
 import type { BlockData } from '../types';
+import type { LegendItem } from '../hud/Legend';
 
 /**
  * WaveformHorizon - Synthwave oscilloscope visualization
@@ -259,6 +260,17 @@ export class WaveformHorizon extends BaseVisualization {
     const time = this.clock.getElapsedTime();
     this.camera.position.x = Math.sin(time * 0.2) * 2;
     this.camera.position.y = 5 + Math.sin(time * 0.3) * 0.5;
+  }
+
+  getLegend(): LegendItem[] {
+    return [
+      { label: 'Cyan Wave', color: 0x00ddff, description: 'Low volume trades' },
+      { label: 'Purple Wave', color: 0x8b5cf6, description: 'Medium volume' },
+      { label: 'Pink Wave', color: 0xff006e, description: 'High volume trades' },
+      { label: 'Wave Height', color: 0xffffff, description: 'Trade volume (log scale)' },
+      { label: 'Sun Glow', color: 0xff006e, description: 'Block revenue intensity' },
+      { label: 'Grid Flash', color: 0xff006e, description: 'Block completion' },
+    ];
   }
 
   dispose(): void {

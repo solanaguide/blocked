@@ -3,6 +3,8 @@ import { BaseVisualization } from '../core/BaseVisualization';
 import { tokenColors, hashColor, txTypeColors } from '../utils/colors';
 import type { TradeMessage, BlockMessage } from '../../../shared/types';
 import type { BlockData } from '../types';
+import type { LegendItem } from '../hud/Legend';
+import type { DataProcessor } from '../data/DataProcessor';
 
 /**
  * TokenGalaxy - Orbital particle system with SOL at center
@@ -65,6 +67,138 @@ export class TokenGalaxy extends BaseVisualization {
 
     // Stars
     this.createStarfield();
+  }
+
+  /**
+   * Override init to preload from cached network state
+   */
+  init(container: HTMLElement, dataProcessor: DataProcessor): void {
+    super.init(container, dataProcessor);
+
+    // Preload from cached network state (fire and forget)
+    this.preloadFromCache();
+  }
+
+  /**
+   * Fetch cached network state and initialize token orbits
+   */
+  private async preloadFromCache(): Promise<void> {
+    try {
+      const response = await fetch('/api/network-state');
+      if (response.ok) {
+        const state = await response.json();
+        this.initializeFromCache(state);
+      }
+    } catch (err) {
+      console.warn('TokenGalaxy: Could not fetch network state for preloading');
+    }
+  }
+
+  /**
+   * Initialize token orbits from cached network state
+   */
+  private initializeFromCache(state: {
+    topTokens: Array<{ id: string; volume: number; trades: number }>;
+  }): void {
+    if (!state.topTokens || state.topTokens.length === 0) return;
+
+    // Create orbits for cached top tokens immediately
+    state.topTokens.slice(0, this.maxTokens).forEach((token, index) => {
+      if (this.tokenOrbits.has(token.id)) return;
+
+      let orbitRadius: number;
+      if (this.majorTokens.has(token.id)) {
+        orbitRadius = this.majorTokens.get(token.id)!;
+      } else {
+        const majorCount = Array.from(this.majorTokens.keys()).filter(
+          t => state.topTokens.some(tt => tt.id === t)
+        ).length;
+        const nonMajorIndex = index - majorCount;
+        orbitRadius = 16 + Math.max(0, nonMajorIndex) * 3;
+      }
+
+      const color = tokenColors.get(token.id) || hashColor(token.id);
+
+      this.tokenOrbits.set(token.id, {
+        token: token.id,
+        orbitRadius,
+        color,
+        volume: token.volume,
+      });
+
+      // Create visible starter particles for this token based on cached trade count
+      const particleCount = Math.min(5, Math.ceil(token.trades / 100));
+      for (let i = 0; i < particleCount; i++) {
+        this.createParticleForToken(token.id, orbitRadius, color, token.volume / (particleCount * 10));
+      }
+    });
+
+    console.log(`TokenGalaxy: Preloaded ${this.tokenOrbits.size} token orbits from cache`);
+  }
+
+  /**
+   * Create a particle for a given token orbit
+   */
+  private createParticleForToken(token: string, orbitRadius: number, color: number, volume: number): void {
+    if (!this.particles.has(token)) {
+      this.particles.set(token, []);
+    }
+
+    const size = Math.min(2, 0.5 + Math.log10(Math.max(1, volume)) * 0.2);
+
+    const geometry = new THREE.SphereGeometry(size, 8, 8);
+    const material = new THREE.MeshStandardMaterial({
+      color: color,
+      emissive: color,
+      emissiveIntensity: 0.8,
+    });
+
+    const mesh = new THREE.Mesh(geometry, material);
+
+    // Calculate orbit parameters
+    const orbitSpeed = 0.3 + Math.random() * 0.4;
+    const orbitAngle = Math.random() * Math.PI * 2;
+    const orbitTilt = (Math.random() - 0.5) * Math.PI * 0.4;
+
+    // Position particle on orbit
+    const x = Math.cos(orbitAngle) * orbitRadius;
+    const y = Math.sin(orbitTilt) * orbitRadius * 0.2;
+    const z = Math.sin(orbitAngle) * orbitRadius;
+
+    mesh.position.set(x, y, z);
+
+    // Add trail
+    const trailGeometry = new THREE.BufferGeometry();
+    const trailPositions = new Float32Array(15 * 3);
+    for (let i = 0; i < 15; i++) {
+      trailPositions[i * 3] = x;
+      trailPositions[i * 3 + 1] = y;
+      trailPositions[i * 3 + 2] = z;
+    }
+    trailGeometry.setAttribute('position', new THREE.BufferAttribute(trailPositions, 3));
+
+    const trailMaterial = new THREE.LineBasicMaterial({
+      color: color,
+      transparent: true,
+      opacity: 0.3,
+    });
+
+    const trail = new THREE.Line(trailGeometry, trailMaterial);
+
+    this.scene.add(mesh);
+    this.scene.add(trail);
+
+    this.particles.get(token)!.push({
+      mesh,
+      trail,
+      orbitRadius: orbitRadius,
+      orbitSpeed,
+      orbitAngle,
+      orbitTilt,
+      trailPositions: [],
+      lifetime: 8000 + Math.random() * 4000, // Longer lifetime for preloaded particles
+      age: 0,
+    });
   }
 
   private createStarfield(): void {
@@ -325,13 +459,23 @@ export class TokenGalaxy extends BaseVisualization {
       this.sunGlow.intensity *= 0.95;
     }
 
-    // Orbit camera around the galaxy
-    this.cameraAngle += deltaTime * 0.0002;
+    // Orbit camera around the galaxy - 10x slower for stability
+    this.cameraAngle += deltaTime * 0.00002;
     const cameraDistance = 80;
     this.camera.position.x = Math.cos(this.cameraAngle) * cameraDistance;
     this.camera.position.z = Math.sin(this.cameraAngle) * cameraDistance;
-    this.camera.position.y = 40 + Math.sin(time * 0.1) * 8;
+    this.camera.position.y = 40 + Math.sin(time * 0.05) * 5; // Slower, smaller vertical movement
     this.camera.lookAt(0, 0, 0);
+  }
+
+  getLegend(): LegendItem[] {
+    return [
+      { label: 'Center Sun', color: 0x9945ff, description: 'SOL (Solana native token)' },
+      { label: 'Inner Orbits', color: 0x2775ca, description: 'USDC/USDT stablecoins' },
+      { label: 'Outer Orbits', color: 0x00CED1, description: 'Top traded tokens by volume' },
+      { label: 'Particle Size', color: 0x8b5cf6, description: 'Trade volume (log scale)' },
+      { label: 'Nova Burst', color: 0xff006e, description: 'New block arrival' },
+    ];
   }
 
   dispose(): void {

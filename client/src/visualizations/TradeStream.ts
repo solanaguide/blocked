@@ -3,6 +3,7 @@ import { BaseVisualization } from '../core/BaseVisualization';
 import { programColors, txTypeColors } from '../utils/colors';
 import type { TradeMessage, BlockMessage } from '../../../shared/types';
 import type { BlockData } from '../types';
+import type { LegendItem } from '../hud/Legend';
 
 /**
  * TradeStream - Trades flying from left to right with block dividers
@@ -223,13 +224,58 @@ export class TradeStream extends BaseVisualization {
     const edges = new THREE.LineSegments(edgeGeometry, edgeMaterial);
     mesh.add(edges);
 
+    // Add slot number label above the divider
+    const label = this.createSlotLabel(slot);
+    label.position.set(0, 35, 1);
+    mesh.add(label);
+
     this.scene.add(mesh);
 
     this.dividers.push({
       mesh,
       slot,
       opacity: 0.8,
+      label,
     });
+  }
+
+  /**
+   * Create a slot number label sprite
+   */
+  private createSlotLabel(slot: number): THREE.Sprite {
+    const canvas = document.createElement('canvas');
+    const context = canvas.getContext('2d')!;
+    canvas.width = 128;
+    canvas.height = 32;
+
+    context.clearRect(0, 0, canvas.width, canvas.height);
+    context.font = 'bold 16px Arial';
+    context.textAlign = 'center';
+    context.textBaseline = 'middle';
+
+    // Show abbreviated slot number (last 6 digits)
+    const slotStr = slot.toString().slice(-6);
+
+    // Text shadow
+    context.shadowColor = 'rgba(0, 0, 0, 0.8)';
+    context.shadowBlur = 3;
+
+    context.fillStyle = '#ff006e';
+    context.fillText(`#${slotStr}`, canvas.width / 2, canvas.height / 2);
+
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.needsUpdate = true;
+
+    const material = new THREE.SpriteMaterial({
+      map: texture,
+      transparent: true,
+      depthTest: false,
+    });
+
+    const sprite = new THREE.Sprite(material);
+    sprite.scale.set(8, 2, 1);
+
+    return sprite;
   }
 
   update(deltaTime: number): void {
@@ -282,12 +328,27 @@ export class TradeStream extends BaseVisualization {
         this.scene.remove(divider.mesh);
         divider.mesh.geometry.dispose();
         (divider.mesh.material as THREE.Material).dispose();
+        // Dispose label if present
+        if (divider.label) {
+          (divider.label.material as THREE.SpriteMaterial).map?.dispose();
+          (divider.label.material as THREE.SpriteMaterial).dispose();
+        }
         this.dividers.splice(index, 1);
       }
     });
 
     // Subtle camera movement
     this.camera.position.y = Math.sin(time * 0.3) * 3;
+  }
+
+  getLegend(): LegendItem[] {
+    return [
+      { label: 'Particle', color: 0x8b5cf6, description: 'Individual trade' },
+      { label: 'Particle Size', color: 0x00CED1, description: 'Trade volume (log scale)' },
+      { label: 'Particle Color', color: 0xff006e, description: 'Program identity (DEX)' },
+      { label: 'Vertical Line', color: 0xff006e, description: 'Block boundary with slot number' },
+      { label: 'Flow Speed', color: 0xffffff, description: 'Network transaction rate' },
+    ];
   }
 
   dispose(): void {
@@ -305,6 +366,10 @@ export class TradeStream extends BaseVisualization {
       this.scene.remove(divider.mesh);
       divider.mesh.geometry.dispose();
       (divider.mesh.material as THREE.Material).dispose();
+      if (divider.label) {
+        (divider.label.material as THREE.SpriteMaterial).map?.dispose();
+        (divider.label.material as THREE.SpriteMaterial).dispose();
+      }
     });
     this.dividers = [];
 
@@ -322,4 +387,5 @@ interface BlockDivider {
   mesh: THREE.Mesh;
   slot: number;
   opacity: number;
+  label?: THREE.Sprite;
 }

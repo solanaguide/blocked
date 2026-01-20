@@ -3,6 +3,7 @@ import { BaseVisualization } from '../core/BaseVisualization';
 import { txTypeColors } from '../utils/colors';
 import type { TradeMessage, BlockMessage } from '../../../shared/types';
 import type { BlockData } from '../types';
+import type { LegendItem } from '../hud/Legend';
 
 /**
  * RevenueTracker - Network revenue/PMF visualization
@@ -375,6 +376,17 @@ export class RevenueTracker extends BaseVisualization {
     this.camera.position.z = Math.sin(this.cameraAngle) * camRadius;
     this.camera.position.y = 20 + Math.sin(time * 0.1) * 5;
     this.camera.lookAt(0, 0, 0);
+  }
+
+  getLegend(): LegendItem[] {
+    return [
+      { label: 'Central Orb', color: 0x00CED1, description: 'Total revenue (size = SOL)' },
+      { label: 'Blue Ring', color: 0x4444ff, description: 'Base fees' },
+      { label: 'Cyan Ring', color: 0x00CED1, description: 'Priority fees' },
+      { label: 'Orange Ring', color: txTypeColors.jito, description: 'MEV tips (Jito)' },
+      { label: 'Ring Size', color: 0xffffff, description: 'Fee proportion' },
+      { label: 'Gold Explosion', color: 0xffd700, description: 'Whale activity (>10 SOL)' },
+    ];
   }
 
   dispose(): void {

@@ -3,6 +3,7 @@ import { BaseVisualization } from '../core/BaseVisualization';
 import { txTypeColors, volumeHeatmap } from '../utils/colors';
 import type { TradeMessage, BlockMessage } from '../../../shared/types';
 import type { BlockData } from '../types';
+import type { LegendItem } from '../hud/Legend';
 
 /**
  * BlockStack3D - 3D blocks scrolling through time
@@ -23,11 +24,15 @@ export class BlockStack3D extends BaseVisualization {
   // Current block being built
   private currentBlockData: BlockMessage | null = null;
 
-  // Camera animation
-  private cameraAngle = 0;
+  // Shadow-casting light reference
+  private shadowLight: THREE.DirectionalLight;
 
   constructor() {
     super();
+
+    // Enable shadow maps on renderer
+    this.renderer.shadowMap.enabled = true;
+    this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 
     // Camera setup - isometric-ish view
     this.camera.position.set(30, 25, 50);
@@ -37,19 +42,44 @@ export class BlockStack3D extends BaseVisualization {
     const ambientLight = new THREE.AmbientLight(0xffffff, 0.3);
     this.scene.add(ambientLight);
 
-    // Key light (warm)
-    const keyLight = new THREE.DirectionalLight(0xffeedd, 0.8);
-    keyLight.position.set(20, 30, 20);
-    this.scene.add(keyLight);
+    // Key light (warm) - with shadow casting
+    this.shadowLight = new THREE.DirectionalLight(0xffeedd, 0.8);
+    this.shadowLight.position.set(20, 40, 20);
+    this.shadowLight.castShadow = true;
+    this.shadowLight.shadow.mapSize.width = 1024;
+    this.shadowLight.shadow.mapSize.height = 1024;
+    this.shadowLight.shadow.camera.near = 1;
+    this.shadowLight.shadow.camera.far = 100;
+    this.shadowLight.shadow.camera.left = -60;
+    this.shadowLight.shadow.camera.right = 60;
+    this.shadowLight.shadow.camera.top = 40;
+    this.shadowLight.shadow.camera.bottom = -40;
+    this.shadowLight.shadow.bias = -0.001;
+    this.scene.add(this.shadowLight);
 
     // Fill light (cool)
     const fillLight = new THREE.DirectionalLight(0x88ccff, 0.4);
     fillLight.position.set(-20, 10, -10);
     this.scene.add(fillLight);
 
-    // Grid floor
+    // Grid floor that receives shadows
+    const gridFloorGeometry = new THREE.PlaneGeometry(120, 120);
+    const gridFloorMaterial = new THREE.MeshStandardMaterial({
+      color: 0x001122,
+      roughness: 0.9,
+      metalness: 0.1,
+      transparent: true,
+      opacity: 0.5,
+    });
+    const gridFloor = new THREE.Mesh(gridFloorGeometry, gridFloorMaterial);
+    gridFloor.rotation.x = -Math.PI / 2;
+    gridFloor.position.y = -10;
+    gridFloor.receiveShadow = true;
+    this.scene.add(gridFloor);
+
+    // Grid lines overlay
     const gridHelper = new THREE.GridHelper(120, 40, 0x004444, 0x002222);
-    gridHelper.position.y = -10;
+    gridHelper.position.y = -9.99;
     this.scene.add(gridHelper);
 
     // Starfield
@@ -200,6 +230,8 @@ export class BlockStack3D extends BaseVisualization {
 
     const mesh = new THREE.Mesh(geometry, material);
     mesh.position.y = height / 2 - 10; // Sit on grid
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
     group.add(mesh);
 
     // Add glowing edges
@@ -330,14 +362,23 @@ export class BlockStack3D extends BaseVisualization {
       }
     });
 
-    // Gentle camera orbit
-    this.cameraAngle += deltaTime * 0.00003;
-    const camRadius = 60;
-    const camHeight = 25 + Math.sin(time * 0.1) * 5;
-    this.camera.position.x = Math.cos(this.cameraAngle) * camRadius + 10;
-    this.camera.position.z = Math.sin(this.cameraAngle) * camRadius;
-    this.camera.position.y = camHeight;
-    this.camera.lookAt(-10, 0, 0);
+    // Fixed isometric camera with subtle vertical float (no orbiting)
+    // Blocks march LEFT toward negative X (into the past)
+    const camHeight = 25 + Math.sin(time * 0.1) * 3;
+    this.camera.position.set(50, camHeight, 40);
+    this.camera.lookAt(-20, 0, 0);
+  }
+
+  getLegend(): LegendItem[] {
+    return [
+      { label: 'Block Size', color: 0x00CED1, description: 'Total volume (swap + transfer)' },
+      { label: 'Block Glow', color: 0xffffff, description: 'Revenue (fees + jito)' },
+      { label: 'Block Height', color: 0x8b5cf6, description: 'Compute units used' },
+      { label: 'Gold Sphere', color: txTypeColors.vote, description: 'Vote transactions' },
+      { label: 'Cyan Sphere', color: txTypeColors.completed, description: 'Completed transactions' },
+      { label: 'Amber Sphere', color: txTypeColors.reverted, description: 'Reverted transactions' },
+      { label: 'Orange Diamond', color: txTypeColors.jito, description: 'MEV (Jito) transactions' },
+    ];
   }
 
   dispose(): void {

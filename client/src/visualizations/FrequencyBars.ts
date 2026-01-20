@@ -3,6 +3,8 @@ import { BaseVisualization } from '../core/BaseVisualization';
 import { programColors, colorToHex, txTypeColors } from '../utils/colors';
 import type { TradeMessage, BlockMessage } from '../../../shared/types';
 import type { BlockData } from '../types';
+import type { LegendItem } from '../hud/Legend';
+import type { DataProcessor } from '../data/DataProcessor';
 
 /**
  * FrequencyBars - Classic Winamp-style EQ visualization
@@ -31,6 +33,7 @@ export class FrequencyBars extends BaseVisualization {
   private ambientLight!: THREE.AmbientLight;
   private rimLight!: THREE.DirectionalLight;
 
+
   constructor() {
     super();
 
@@ -55,6 +58,56 @@ export class FrequencyBars extends BaseVisualization {
     this.scene.add(this.rimLight);
 
     // Bars are created dynamically as programs appear
+  }
+
+  /**
+   * Override init to preload from cached network state
+   */
+  init(container: HTMLElement, dataProcessor: DataProcessor): void {
+    super.init(container, dataProcessor);
+    this.preloadFromCache();
+  }
+
+  /**
+   * Fetch cached network state and initialize bars immediately
+   */
+  private async preloadFromCache(): Promise<void> {
+    try {
+      const response = await fetch('/api/network-state');
+      if (response.ok) {
+        const state = await response.json();
+        this.initializeFromCache(state);
+      }
+    } catch (err) {
+      console.warn('FrequencyBars: Could not fetch network state for preloading');
+    }
+  }
+
+  /**
+   * Initialize bars from cached network state
+   */
+  private initializeFromCache(state: {
+    topPrograms: Array<{ id: string; volume: number; trades: number }>;
+  }): void {
+    if (!state.topPrograms || state.topPrograms.length === 0) return;
+
+    // Initialize program data from cache
+    state.topPrograms.slice(0, this.maxBars).forEach(p => {
+      const maxHeight = 20;
+      const volumeLog = Math.log10(Math.max(1, p.volume));
+      const target = Math.min(maxHeight, 0.1 + volumeLog * 2);
+
+      this.programData.set(p.id, {
+        volume: p.volume,
+        trades: p.trades,
+        target: target,
+      });
+    });
+
+    // Create bars immediately
+    this.repositionBars();
+
+    console.log(`FrequencyBars: Preloaded ${this.bars.size} bars from cache`);
   }
 
   private createOrUpdateBar(program: string, index: number, totalBars: number): void {
@@ -88,6 +141,12 @@ export class FrequencyBars extends BaseVisualization {
     const wireframe = new THREE.LineSegments(edges, lineMaterial);
     mesh.add(wireframe);
 
+    // Add program label below the bar (use ID directly)
+    const label = this.createTextSprite(program, color);
+    label.position.set(x, -2.5, 0);
+    label.scale.set(5, 1.5, 1);
+    this.scene.add(label);
+
     this.scene.add(mesh);
 
     this.bars.set(program, {
@@ -97,7 +156,45 @@ export class FrequencyBars extends BaseVisualization {
       targetHeight: 0.1,
       wireframe,
       program,
+      label,
     });
+  }
+
+  /**
+   * Create a text sprite label
+   */
+  private createTextSprite(text: string, color: number): THREE.Sprite {
+    const canvas = document.createElement('canvas');
+    const context = canvas.getContext('2d')!;
+    canvas.width = 256;
+    canvas.height = 64;
+
+    context.clearRect(0, 0, canvas.width, canvas.height);
+    context.font = 'bold 24px Arial';
+    context.textAlign = 'center';
+    context.textBaseline = 'middle';
+
+    const hexColor = '#' + color.toString(16).padStart(6, '0');
+
+    // Text shadow for visibility
+    context.shadowColor = 'rgba(0, 0, 0, 0.8)';
+    context.shadowBlur = 4;
+    context.shadowOffsetX = 2;
+    context.shadowOffsetY = 2;
+
+    context.fillStyle = hexColor;
+    context.fillText(text, canvas.width / 2, canvas.height / 2);
+
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.needsUpdate = true;
+
+    const material = new THREE.SpriteMaterial({
+      map: texture,
+      transparent: true,
+      depthTest: false,
+    });
+
+    return new THREE.Sprite(material);
   }
 
   private repositionBars(): void {
@@ -118,6 +215,10 @@ export class FrequencyBars extends BaseVisualization {
 
       const bar = this.bars.get(program)!;
       bar.mesh.position.x = x;
+      // Also reposition the label
+      if (bar.label) {
+        bar.label.position.x = x;
+      }
     });
 
     // Remove bars not in top N
@@ -129,6 +230,12 @@ export class FrequencyBars extends BaseVisualization {
         (bar.mesh.material as THREE.Material).dispose();
         bar.wireframe.geometry.dispose();
         (bar.wireframe.material as THREE.Material).dispose();
+        // Dispose label
+        if (bar.label) {
+          this.scene.remove(bar.label);
+          (bar.label.material as THREE.SpriteMaterial).map?.dispose();
+          (bar.label.material as THREE.SpriteMaterial).dispose();
+        }
         this.bars.delete(program);
       }
     });
@@ -263,12 +370,27 @@ export class FrequencyBars extends BaseVisualization {
     this.camera.position.x = Math.sin(time * 0.1) * 5;
   }
 
+  getLegend(): LegendItem[] {
+    return [
+      { label: 'Bar Height', color: 0x00CED1, description: 'Program trade volume (log scale)' },
+      { label: 'Bar Color', color: 0x8b5cf6, description: 'Program identity' },
+      { label: 'Glow', color: 0xff006e, description: 'Block revenue (brighter = more fees)' },
+      { label: 'Bass Kick', color: 0xffffff, description: 'New block arrival' },
+    ];
+  }
+
   dispose(): void {
     this.bars.forEach(bar => {
       if (bar.mesh.geometry) bar.mesh.geometry.dispose();
       if (bar.mesh.material) (bar.mesh.material as THREE.Material).dispose();
       if (bar.wireframe.geometry) bar.wireframe.geometry.dispose();
       if (bar.wireframe.material) (bar.wireframe.material as THREE.Material).dispose();
+      // Dispose label
+      if (bar.label) {
+        this.scene.remove(bar.label);
+        (bar.label.material as THREE.SpriteMaterial).map?.dispose();
+        (bar.label.material as THREE.SpriteMaterial).dispose();
+      }
     });
     this.bars.clear();
     this.programData.clear();
@@ -284,4 +406,5 @@ interface BarMesh {
   currentHeight: number;
   targetHeight: number;
   program: string;
+  label?: THREE.Sprite;
 }

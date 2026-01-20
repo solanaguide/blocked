@@ -3,6 +3,7 @@ import { BaseVisualization } from '../core/BaseVisualization';
 import { txTypeColors } from '../utils/colors';
 import type { TradeMessage, BlockMessage } from '../../../shared/types';
 import type { BlockData } from '../types';
+import type { LegendItem } from '../hud/Legend';
 
 /**
  * VolumeFlow - Flowing river of economic activity
@@ -14,6 +15,8 @@ import type { BlockData } from '../types';
  * - Amber tint = reverted transactions (market volatility)
  * - Waterfalls at block boundaries
  * - Trade particles float down the stream
+ *
+ * PERFORMANCE: Uses InstancedMesh for particles → 2 draw calls (flow + waterfall)
  */
 export class VolumeFlow extends BaseVisualization {
   // River mesh and geometry
@@ -22,13 +25,15 @@ export class VolumeFlow extends BaseVisualization {
   private riverWidth = 10;
   private targetRiverWidth = 10;
 
-  // Floating trade particles
-  private particles: FlowParticle[] = [];
-  private maxParticles = 150;
+  // Floating trade particles using InstancedMesh
+  private maxFlowParticles = 150;
+  private flowParticleData: FlowParticleData[] = [];
+  private flowInstancedMesh: THREE.InstancedMesh;
 
-  // Waterfall effects on block change
-  private waterfalls: WaterfallParticle[] = [];
-  private maxWaterfalls = 50;
+  // Waterfall effects using InstancedMesh
+  private maxWaterfallParticles = 50;
+  private waterfallData: WaterfallData[] = [];
+  private waterfallInstancedMesh: THREE.InstancedMesh;
 
   // Block metrics
   private blockVolume = 0;
@@ -43,14 +48,18 @@ export class VolumeFlow extends BaseVisualization {
   private mainLight: THREE.PointLight;
   private ambientLight: THREE.AmbientLight;
 
-  // Camera
-  private cameraAngle = 0;
+  // Reusable objects to avoid GC pressure
+  private readonly _tempMatrix = new THREE.Matrix4();
+  private readonly _tempPosition = new THREE.Vector3();
+  private readonly _tempQuaternion = new THREE.Quaternion();
+  private readonly _tempScale = new THREE.Vector3();
+  private readonly _tempColor = new THREE.Color();
 
   constructor() {
     super();
 
-    // Camera looking down at the river from above/side
-    this.camera.position.set(0, 25, 35);
+    // Side-on camera for clear left-to-right flow viewing
+    this.camera.position.set(0, 20, 60);
     this.camera.lookAt(0, 0, 0);
 
     // Create the river
@@ -74,11 +83,58 @@ export class VolumeFlow extends BaseVisualization {
 
     // Starfield
     this.createStarfield();
+
+    // Create InstancedMesh for flow particles
+    const flowGeometry = new THREE.SphereGeometry(1, 8, 8);
+    const flowMaterial = new THREE.MeshStandardMaterial({
+      color: 0x00CED1,
+      emissive: 0x00CED1,
+      emissiveIntensity: 1.0,
+      transparent: true,
+      opacity: 0.9,
+    });
+    this.flowInstancedMesh = new THREE.InstancedMesh(flowGeometry, flowMaterial, this.maxFlowParticles);
+    this.flowInstancedMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+
+    // Initialize all flow instances as invisible
+    for (let i = 0; i < this.maxFlowParticles; i++) {
+      this._tempMatrix.makeScale(0, 0, 0);
+      this.flowInstancedMesh.setMatrixAt(i, this._tempMatrix);
+    }
+    this.flowInstancedMesh.instanceMatrix.needsUpdate = true;
+    this.scene.add(this.flowInstancedMesh);
+
+    // Create InstancedMesh for waterfall particles
+    const waterfallGeometry = new THREE.SphereGeometry(1, 6, 6);
+    const waterfallMaterial = new THREE.MeshStandardMaterial({
+      color: 0x00CED1,
+      emissive: 0x00CED1,
+      emissiveIntensity: 1.5,
+      transparent: true,
+      opacity: 1.0,
+    });
+    this.waterfallInstancedMesh = new THREE.InstancedMesh(waterfallGeometry, waterfallMaterial, this.maxWaterfallParticles);
+    this.waterfallInstancedMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+
+    // Enable per-instance colors for waterfall
+    this.waterfallInstancedMesh.instanceColor = new THREE.InstancedBufferAttribute(
+      new Float32Array(this.maxWaterfallParticles * 3),
+      3
+    );
+    this.waterfallInstancedMesh.instanceColor.setUsage(THREE.DynamicDrawUsage);
+
+    // Initialize all waterfall instances as invisible
+    for (let i = 0; i < this.maxWaterfallParticles; i++) {
+      this._tempMatrix.makeScale(0, 0, 0);
+      this.waterfallInstancedMesh.setMatrixAt(i, this._tempMatrix);
+    }
+    this.waterfallInstancedMesh.instanceMatrix.needsUpdate = true;
+    this.scene.add(this.waterfallInstancedMesh);
   }
 
   private createRiver(): void {
-    // River is a long plane that we'll animate
-    const geometry = new THREE.PlaneGeometry(this.riverWidth, 80, 32, 64);
+    // River flows LEFT to RIGHT along X-axis (80 units long, width varies with volume)
+    const geometry = new THREE.PlaneGeometry(80, this.riverWidth, 64, 32);
     this.riverMaterial = new THREE.MeshStandardMaterial({
       color: 0x00CED1,
       emissive: 0x00CED1,
@@ -97,23 +153,25 @@ export class VolumeFlow extends BaseVisualization {
   }
 
   private createTerrain(): void {
-    // Left bank
-    const bankGeometry = new THREE.BoxGeometry(15, 3, 80);
+    // Banks run parallel to river (along X-axis), positioned on Z-axis
+    const bankGeometry = new THREE.BoxGeometry(100, 3, 12);
     const bankMaterial = new THREE.MeshStandardMaterial({
       color: 0x1a1a2e,
       roughness: 0.9,
     });
 
-    const leftBank = new THREE.Mesh(bankGeometry, bankMaterial);
-    leftBank.position.set(-15, -3, 0);
-    this.scene.add(leftBank);
+    // Near bank (closer to camera)
+    const nearBank = new THREE.Mesh(bankGeometry, bankMaterial);
+    nearBank.position.set(0, -3, 18);
+    this.scene.add(nearBank);
 
-    const rightBank = new THREE.Mesh(bankGeometry, bankMaterial);
-    rightBank.position.set(15, -3, 0);
-    this.scene.add(rightBank);
+    // Far bank (away from camera)
+    const farBank = new THREE.Mesh(bankGeometry, bankMaterial);
+    farBank.position.set(0, -3, -18);
+    this.scene.add(farBank);
 
     // Grid helper beneath
-    const gridHelper = new THREE.GridHelper(100, 50, 0x003333, 0x001111);
+    const gridHelper = new THREE.GridHelper(120, 60, 0x003333, 0x001111);
     gridHelper.position.y = -5;
     this.scene.add(gridHelper);
   }
@@ -147,37 +205,39 @@ export class VolumeFlow extends BaseVisualization {
   }
 
   onTrade(trade: TradeMessage, slot: number): void {
-    if (this.particles.length >= this.maxParticles) return;
+    if (this.flowParticleData.length >= this.maxFlowParticles) return;
 
     const volume = trade.vu;
     const size = Math.min(1.5, 0.3 + Math.log10(Math.max(1, volume)) * 0.15);
 
-    // Particle color based on trade type
-    const color = 0x00CED1; // Cyan for trades
+    // Start at LEFT of river (-X), flow toward RIGHT (+X)
+    // Z position is random within river width
+    const z = (Math.random() - 0.5) * this.riverWidth * 0.8;
+    const position = new THREE.Vector3(-40, -1.5, z);
 
-    const geometry = new THREE.SphereGeometry(size, 8, 8);
-    const material = new THREE.MeshStandardMaterial({
-      color: color,
-      emissive: color,
-      emissiveIntensity: 1.0,
-      transparent: true,
-      opacity: 0.9,
-    });
+    let instanceIndex: number;
+    if (this.flowParticleData.length < this.maxFlowParticles) {
+      instanceIndex = this.flowParticleData.length;
+      this.flowParticleData.push({
+        instanceIndex,
+        position,
+        speed: this.flowSpeed * (0.8 + Math.random() * 0.4),
+        wobble: Math.random() * Math.PI * 2,
+        lifetime: 15000,
+        age: 0,
+        size,
+        opacity: 0.9,
+      });
+    } else {
+      return; // Already at max
+    }
 
-    const mesh = new THREE.Mesh(geometry, material);
-
-    // Start at the top of the river
-    const x = (Math.random() - 0.5) * this.riverWidth * 0.8;
-    mesh.position.set(x, -1.5, -35);
-
-    this.scene.add(mesh);
-    this.particles.push({
-      mesh,
-      speed: this.flowSpeed * (0.8 + Math.random() * 0.4),
-      wobble: Math.random() * Math.PI * 2,
-      lifetime: 15000,
-      age: 0,
-    });
+    // Update instance
+    this._tempPosition.copy(position);
+    this._tempScale.setScalar(size);
+    this._tempMatrix.compose(this._tempPosition, this._tempQuaternion, this._tempScale);
+    this.flowInstancedMesh.setMatrixAt(instanceIndex, this._tempMatrix);
+    this.flowInstancedMesh.instanceMatrix.needsUpdate = true;
   }
 
   onBlockComplete(blockData: BlockData, oldSlot: number, newSlot: number): void {
@@ -186,44 +246,68 @@ export class VolumeFlow extends BaseVisualization {
   }
 
   private createWaterfall(): void {
-    const particleCount = Math.min(30, this.maxWaterfalls - this.waterfalls.length);
+    const particleCount = Math.min(30, this.maxWaterfallParticles - this.waterfallData.length);
 
     for (let i = 0; i < particleCount; i++) {
       const size = 0.2 + Math.random() * 0.3;
-      const geometry = new THREE.SphereGeometry(size, 6, 6);
 
       // Color based on completion rate
       const baseColor = new THREE.Color(0x00CED1);
       const amberColor = new THREE.Color(txTypeColors.reverted);
       baseColor.lerp(amberColor, (1 - this.completionRate) * 0.5);
 
-      const material = new THREE.MeshStandardMaterial({
-        color: baseColor,
-        emissive: baseColor,
-        emissiveIntensity: 1.5,
-        transparent: true,
-        opacity: 1.0,
-      });
-
-      const mesh = new THREE.Mesh(geometry, material);
-
-      // Start at a "waterfall" position
-      const x = (Math.random() - 0.5) * this.riverWidth * 0.6;
-      mesh.position.set(x, 2, -30 + Math.random() * 5);
+      // Waterfall spawns at left side, cascades down and flows right
+      const z = (Math.random() - 0.5) * this.riverWidth * 0.6;
+      const position = new THREE.Vector3(-35 + Math.random() * 5, 2, z);
 
       const velocity = new THREE.Vector3(
-        (Math.random() - 0.5) * 0.1,
+        this.flowSpeed * 0.5, // Flow right (+X)
         -0.1 - Math.random() * 0.1,
-        this.flowSpeed * 0.5
+        (Math.random() - 0.5) * 0.1
       );
 
-      this.scene.add(mesh);
-      this.waterfalls.push({
-        mesh,
-        velocity,
-        lifetime: 3000,
-        age: 0,
-      });
+      let instanceIndex: number;
+      if (this.waterfallData.length < this.maxWaterfallParticles) {
+        instanceIndex = this.waterfallData.length;
+        this.waterfallData.push({
+          instanceIndex,
+          position,
+          velocity,
+          lifetime: 3000,
+          age: 0,
+          size,
+          opacity: 1.0,
+          color: baseColor.getHex(),
+        });
+      } else {
+        // Replace oldest
+        const oldest = this.waterfallData.shift()!;
+        instanceIndex = oldest.instanceIndex;
+        this.waterfallData.push({
+          instanceIndex,
+          position,
+          velocity,
+          lifetime: 3000,
+          age: 0,
+          size,
+          opacity: 1.0,
+          color: baseColor.getHex(),
+        });
+      }
+
+      // Update instance
+      this._tempPosition.copy(position);
+      this._tempScale.setScalar(size);
+      this._tempMatrix.compose(this._tempPosition, this._tempQuaternion, this._tempScale);
+      this.waterfallInstancedMesh.setMatrixAt(instanceIndex, this._tempMatrix);
+
+      this._tempColor.setHex(baseColor.getHex());
+      this.waterfallInstancedMesh.setColorAt(instanceIndex, this._tempColor);
+    }
+
+    this.waterfallInstancedMesh.instanceMatrix.needsUpdate = true;
+    if (this.waterfallInstancedMesh.instanceColor) {
+      this.waterfallInstancedMesh.instanceColor.needsUpdate = true;
     }
   }
 
@@ -272,10 +356,11 @@ export class VolumeFlow extends BaseVisualization {
     this.riverWidth += (this.targetRiverWidth - this.riverWidth) * 0.02;
 
     // Update river geometry width (recreate if significant change)
-    const currentWidth = (this.riverMesh.geometry as THREE.PlaneGeometry).parameters.width;
+    // River is PlaneGeometry(80, width) - length is fixed, width varies
+    const currentWidth = (this.riverMesh.geometry as THREE.PlaneGeometry).parameters.height;
     if (Math.abs(currentWidth - this.riverWidth) > 1) {
       this.riverMesh.geometry.dispose();
-      this.riverMesh.geometry = new THREE.PlaneGeometry(this.riverWidth, 80, 32, 64);
+      this.riverMesh.geometry = new THREE.PlaneGeometry(80, this.riverWidth, 64, 32);
     }
 
     // Animate river flow with vertex displacement
@@ -284,95 +369,123 @@ export class VolumeFlow extends BaseVisualization {
     for (let i = 0; i < positions.count; i++) {
       const x = positions.getX(i);
       const z = positions.getZ(i);
-      // Wave effect
-      const wave = Math.sin(z * 0.1 + this.flowOffset * 5) * 0.3;
-      const ripple = Math.sin(x * 0.3 + time * 2) * 0.1;
+      // Wave effect along X (flow direction)
+      const wave = Math.sin(x * 0.1 + this.flowOffset * 5) * 0.3;
+      const ripple = Math.sin(z * 0.3 + time * 2) * 0.1;
       positions.setY(i, wave + ripple);
     }
     positions.needsUpdate = true;
 
     // Update flow particles
-    for (let i = this.particles.length - 1; i >= 0; i--) {
-      const particle = this.particles[i];
+    let flowNeedsUpdate = false;
+    for (let i = this.flowParticleData.length - 1; i >= 0; i--) {
+      const particle = this.flowParticleData[i];
       particle.age += deltaTime;
 
-      // Move down river
-      particle.mesh.position.z += particle.speed;
+      // Move right along X-axis (LEFT to RIGHT flow)
+      particle.position.x += particle.speed;
 
-      // Gentle wobble
+      // Gentle wobble in Z direction
       particle.wobble += deltaTime * 0.003;
-      particle.mesh.position.x += Math.sin(particle.wobble) * 0.02;
+      particle.position.z += Math.sin(particle.wobble) * 0.02;
 
       // Bob on the water
-      particle.mesh.position.y = -1.5 + Math.sin(time * 3 + particle.wobble) * 0.2;
+      particle.position.y = -1.5 + Math.sin(time * 3 + particle.wobble) * 0.2;
 
       // Fade out
       if (particle.age > particle.lifetime * 0.7) {
         const fadeProgress = (particle.age - particle.lifetime * 0.7) / (particle.lifetime * 0.3);
-        (particle.mesh.material as THREE.MeshStandardMaterial).opacity = 1 - fadeProgress;
+        particle.opacity = 1 - fadeProgress;
       }
 
-      // Remove if off screen or expired
-      if (particle.mesh.position.z > 40 || particle.age > particle.lifetime) {
-        this.scene.remove(particle.mesh);
-        particle.mesh.geometry.dispose();
-        (particle.mesh.material as THREE.Material).dispose();
-        this.particles.splice(i, 1);
+      // Update instance matrix
+      this._tempPosition.copy(particle.position);
+      this._tempScale.setScalar(particle.size * Math.max(0.01, particle.opacity));
+      this._tempMatrix.compose(this._tempPosition, this._tempQuaternion, this._tempScale);
+      this.flowInstancedMesh.setMatrixAt(particle.instanceIndex, this._tempMatrix);
+      flowNeedsUpdate = true;
+
+      // Remove if off screen (right side) or expired
+      if (particle.position.x > 45 || particle.age > particle.lifetime) {
+        this._tempMatrix.makeScale(0, 0, 0);
+        this.flowInstancedMesh.setMatrixAt(particle.instanceIndex, this._tempMatrix);
+        this.flowParticleData.splice(i, 1);
       }
     }
 
+    if (flowNeedsUpdate) {
+      this.flowInstancedMesh.instanceMatrix.needsUpdate = true;
+    }
+
     // Update waterfall particles
-    for (let i = this.waterfalls.length - 1; i >= 0; i--) {
-      const wf = this.waterfalls[i];
+    let waterfallNeedsUpdate = false;
+    for (let i = this.waterfallData.length - 1; i >= 0; i--) {
+      const wf = this.waterfallData[i];
       wf.age += deltaTime;
 
       // Apply velocity and gravity
-      wf.mesh.position.add(wf.velocity);
+      wf.position.add(wf.velocity);
       wf.velocity.y -= 0.005; // Gravity
 
       // Stop at river level
-      if (wf.mesh.position.y < -1.5) {
-        wf.mesh.position.y = -1.5;
+      if (wf.position.y < -1.5) {
+        wf.position.y = -1.5;
         wf.velocity.y = 0;
-        wf.velocity.x *= 0.95;
-        wf.velocity.z = this.flowSpeed; // Join the flow
+        wf.velocity.z *= 0.95;
+        wf.velocity.x = this.flowSpeed; // Join the rightward flow
       }
 
       // Fade out
       const fadeProgress = wf.age / wf.lifetime;
-      (wf.mesh.material as THREE.MeshStandardMaterial).opacity = 1 - fadeProgress;
+      wf.opacity = 1 - fadeProgress;
+
+      // Update instance matrix
+      this._tempPosition.copy(wf.position);
+      this._tempScale.setScalar(wf.size * Math.max(0.01, wf.opacity));
+      this._tempMatrix.compose(this._tempPosition, this._tempQuaternion, this._tempScale);
+      this.waterfallInstancedMesh.setMatrixAt(wf.instanceIndex, this._tempMatrix);
+      waterfallNeedsUpdate = true;
 
       if (wf.age > wf.lifetime) {
-        this.scene.remove(wf.mesh);
-        wf.mesh.geometry.dispose();
-        (wf.mesh.material as THREE.Material).dispose();
-        this.waterfalls.splice(i, 1);
+        this._tempMatrix.makeScale(0, 0, 0);
+        this.waterfallInstancedMesh.setMatrixAt(wf.instanceIndex, this._tempMatrix);
+        this.waterfallData.splice(i, 1);
       }
     }
 
-    // Gentle camera orbit
-    this.cameraAngle += deltaTime * 0.00005;
-    const camRadius = 40;
-    this.camera.position.x = Math.sin(this.cameraAngle) * 15;
-    this.camera.position.z = 35 + Math.cos(this.cameraAngle) * 10;
-    this.camera.position.y = 25 + Math.sin(time * 0.1) * 3;
+    if (waterfallNeedsUpdate) {
+      this.waterfallInstancedMesh.instanceMatrix.needsUpdate = true;
+    }
+
+    // Fixed side-on camera with subtle vertical bob (no orbiting)
+    const camHeight = 20 + Math.sin(time * 0.1) * 2;
+    this.camera.position.set(0, camHeight, 60);
     this.camera.lookAt(0, -2, 0);
   }
 
-  dispose(): void {
-    this.particles.forEach(p => {
-      this.scene.remove(p.mesh);
-      p.mesh.geometry.dispose();
-      (p.mesh.material as THREE.Material).dispose();
-    });
-    this.particles = [];
+  getLegend(): LegendItem[] {
+    return [
+      { label: 'River Width', color: 0x00CED1, description: 'Total volume (wider = more activity)' },
+      { label: 'River Brightness', color: 0xffffff, description: 'Revenue (brighter = more fees)' },
+      { label: 'Cyan Water', color: 0x00CED1, description: 'Completed transactions' },
+      { label: 'Amber Tint', color: txTypeColors.reverted, description: 'Reverted txs (volatility)' },
+      { label: 'Flow Particles', color: 0x00CED1, description: 'Individual trades floating' },
+      { label: 'Waterfall', color: 0x00CED1, description: 'Block boundary burst' },
+    ];
+  }
 
-    this.waterfalls.forEach(wf => {
-      this.scene.remove(wf.mesh);
-      wf.mesh.geometry.dispose();
-      (wf.mesh.material as THREE.Material).dispose();
-    });
-    this.waterfalls = [];
+  dispose(): void {
+    // Clean up flow instanced mesh
+    this.flowInstancedMesh.geometry.dispose();
+    (this.flowInstancedMesh.material as THREE.Material).dispose();
+    this.scene.remove(this.flowInstancedMesh);
+    this.flowParticleData = [];
+
+    // Clean up waterfall instanced mesh
+    this.waterfallInstancedMesh.geometry.dispose();
+    (this.waterfallInstancedMesh.material as THREE.Material).dispose();
+    this.scene.remove(this.waterfallInstancedMesh);
+    this.waterfallData = [];
 
     this.riverMesh.geometry.dispose();
     this.riverMaterial.dispose();
@@ -381,17 +494,24 @@ export class VolumeFlow extends BaseVisualization {
   }
 }
 
-interface FlowParticle {
-  mesh: THREE.Mesh;
+interface FlowParticleData {
+  instanceIndex: number;
+  position: THREE.Vector3;
   speed: number;
   wobble: number;
   lifetime: number;
   age: number;
+  size: number;
+  opacity: number;
 }
 
-interface WaterfallParticle {
-  mesh: THREE.Mesh;
+interface WaterfallData {
+  instanceIndex: number;
+  position: THREE.Vector3;
   velocity: THREE.Vector3;
   lifetime: number;
   age: number;
+  size: number;
+  opacity: number;
+  color: number;
 }

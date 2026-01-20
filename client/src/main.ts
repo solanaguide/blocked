@@ -18,6 +18,7 @@ import { BlockStack3D } from './visualizations/BlockStack3D';
 import { RevenueTracker } from './visualizations/RevenueTracker';
 import { VolumeFlow } from './visualizations/VolumeFlow';
 import { HUD } from './hud/HUD';
+import { Legend } from './hud/Legend';
 import type { WSMessage, BlockMessage } from '../../shared/types';
 import type { FocusMode, ParticleShape } from './types';
 
@@ -26,6 +27,24 @@ const container = document.getElementById('canvas-container')!;
 const dataProcessor = new DataProcessor();
 const sceneManager = new SceneManager(container, dataProcessor);
 const hud = new HUD();
+const legend = new Legend();
+
+// Helper to update legend when scene changes
+function updateLegendForScene() {
+  const activeScene = sceneManager.getActiveScene();
+  if (activeScene && activeScene.getLegend) {
+    const items = activeScene.getLegend();
+    legend.update(items);
+  }
+}
+
+// Expose sceneManager globally for Playwright visual tests
+declare global {
+  interface Window {
+    sceneManager: SceneManager;
+  }
+}
+(window as any).sceneManager = sceneManager;
 
 // Register visualizations
 sceneManager.registerScene('blocks', () => new BlockVisualization());
@@ -199,11 +218,20 @@ document.addEventListener('keydown', (e) => {
   // Scene switching
   if (e.key === '[') {
     sceneManager.previousScene();
+    updateLegendForScene();
     hud.showNotification(`Scene: ${sceneManager.getActiveSceneName()}`, 2000);
   }
   if (e.key === ']') {
     sceneManager.nextScene();
+    updateLegendForScene();
     hud.showNotification(`Scene: ${sceneManager.getActiveSceneName()}`, 2000);
+  }
+
+  // Legend toggle (L key)
+  if (e.key.toLowerCase() === 'l') {
+    updateLegendForScene();
+    const visible = legend.toggle();
+    hud.showNotification(visible ? 'Legend: ON' : 'Legend: OFF', 1000);
   }
 
   // Auto-cycle toggle
@@ -224,6 +252,15 @@ document.addEventListener('keydown', (e) => {
     if (scene && 'toggleVoteParticles' in scene) {
       const showVotes = (scene as any).toggleVoteParticles();
       hud.showNotification(showVotes ? 'Vote particles: ON' : 'Vote particles: OFF', 2000);
+    }
+  }
+
+  // Bloom toggle (B key)
+  if (e.key.toLowerCase() === 'b') {
+    const scene = sceneManager.getActiveScene();
+    if (scene && 'toggleBloom' in scene) {
+      const bloomEnabled = (scene as any).toggleBloom();
+      hud.showNotification(bloomEnabled ? 'Bloom: ON' : 'Bloom: OFF', 2000);
     }
   }
 });

@@ -3,6 +3,8 @@ import { BaseVisualization } from '../core/BaseVisualization';
 import { programColors, txTypeColors } from '../utils/colors';
 import type { TradeMessage, BlockMessage } from '../../../shared/types';
 import type { BlockData } from '../types';
+import type { LegendItem } from '../hud/Legend';
+import type { DataProcessor } from '../data/DataProcessor';
 
 /**
  * LightningNetwork - Network graph of programs and tokens with lightning bolts
@@ -47,6 +49,77 @@ export class LightningNetwork extends BaseVisualization {
     this.scene.add(this.ambientLight);
 
     // Nodes are created dynamically based on trading activity
+  }
+
+  /**
+   * Override init to preload from cached network state
+   */
+  init(container: HTMLElement, dataProcessor: DataProcessor): void {
+    super.init(container, dataProcessor);
+
+    // Preload from cached network state (fire and forget)
+    this.preloadFromCache();
+  }
+
+  /**
+   * Fetch cached network state and initialize nodes immediately
+   */
+  private async preloadFromCache(): Promise<void> {
+    try {
+      const response = await fetch('/api/network-state');
+      if (response.ok) {
+        const state = await response.json();
+        this.initializeFromCache(state);
+      }
+    } catch (err) {
+      console.warn('LightningNetwork: Could not fetch network state for preloading');
+    }
+  }
+
+  /**
+   * Initialize nodes from cached network state
+   */
+  private initializeFromCache(state: {
+    topPrograms: Array<{ id: string; volume: number; trades: number }>;
+    topTokens: Array<{ id: string; volume: number; trades: number }>;
+  }): void {
+    // Initialize program volumes from cache
+    if (state.topPrograms && state.topPrograms.length > 0) {
+      state.topPrograms.slice(0, 8).forEach(p => {
+        this.programVolumes.set(p.id, p.volume);
+      });
+    }
+
+    // Initialize token volumes from cache
+    if (state.topTokens && state.topTokens.length > 0) {
+      state.topTokens.slice(0, 8).forEach(t => {
+        this.tokenVolumes.set(t.id, t.volume);
+      });
+    }
+
+    // Trigger network layout update
+    this.updateNetwork();
+
+    // Create initial lightning bolts between nodes if we have nodes
+    if (this.nodes.size >= 2) {
+      const nodeIds = Array.from(this.nodes.keys());
+      const boltCount = Math.min(10, nodeIds.length * 2);
+      for (let i = 0; i < boltCount; i++) {
+        const sourceId = nodeIds[Math.floor(Math.random() * nodeIds.length)];
+        const targetId = nodeIds[Math.floor(Math.random() * nodeIds.length)];
+        if (sourceId !== targetId) {
+          const sourceNode = this.nodes.get(sourceId);
+          const targetNode = this.nodes.get(targetId);
+          if (sourceNode && targetNode) {
+            const color = programColors.get(sourceId) || 0x8b5cf6;
+            this.createLightningBolt(sourceNode.mesh.position, targetNode.mesh.position, color, 0.2);
+          }
+        }
+      }
+    }
+
+    const nodeCount = this.nodes.size;
+    console.log(`LightningNetwork: Preloaded ${nodeCount} nodes, ${this.bolts.length} bolts from cache (programs: ${state.topPrograms?.length || 0}, tokens: ${state.topTokens?.length || 0})`);
   }
 
   private updateNetwork(): void {
@@ -342,6 +415,16 @@ export class LightningNetwork extends BaseVisualization {
     this.camera.position.z = Math.sin(this.cameraAngle) * radius;
     this.camera.position.y = 20 + Math.sin(time * 0.2) * 5;
     this.camera.lookAt(0, 0, 0);
+  }
+
+  getLegend(): LegendItem[] {
+    return [
+      { label: 'Inner Nodes', color: 0x8b5cf6, description: 'Top programs (DEXes)' },
+      { label: 'Outer Nodes', color: 0x06ffa5, description: 'Top traded tokens' },
+      { label: 'Lightning Bolt', color: 0xff006e, description: 'Trade (program → token)' },
+      { label: 'Bolt Thickness', color: 0x00CED1, description: 'Trade volume (log scale)' },
+      { label: 'Node Pulse', color: 0xffffff, description: 'Accumulated trading energy' },
+    ];
   }
 
   dispose(): void {

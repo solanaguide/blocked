@@ -3,14 +3,15 @@ import { BaseVisualization } from '../core/BaseVisualization';
 import { programColors, txTypeColors } from '../utils/colors';
 import type { TradeMessage, BlockMessage } from '../../../shared/types';
 import type { BlockData } from '../types';
+import type { LegendItem } from '../hud/Legend';
 
 /**
- * StackedBars3D - Endlessly scrolling 3D stacked bar chart with fire aesthetic
+ * StackedBars3D - Endlessly scrolling 3D stacked bar chart
  *
  * CONCEPT: Infinite horizontal scrolling bar chart showing program trading volume.
  * - Each BAR SEGMENT = a program's volume in that time slice
  * - Bars are STACKED vertically by program
- * - COLOR = Fire gradient (blue base → yellow → orange → red at top)
+ * - COLOR = Program identity color (consistent across visualizations)
  * - Bars scroll LEFT continuously like a historical chart
  * - Block change = WHOOSH effect with all bars pulsing
  * - New data appears on RIGHT side, old data scrolls off LEFT
@@ -209,24 +210,14 @@ export class StackedBars3D extends BaseVisualization {
 
       if (segmentHeight < 0.1) return; // Skip tiny segments
 
-      // Fire gradient: blue (base) → yellow → orange → red (top)
-      const heightRatio = (currentY + segmentHeight / 2) / maxHeight;
-      let color: number;
-      if (heightRatio < 0.25) {
-        color = 0x0066ff; // Blue base
-      } else if (heightRatio < 0.5) {
-        color = 0xffaa00; // Yellow
-      } else if (heightRatio < 0.75) {
-        color = 0xff6600; // Orange
-      } else {
-        color = 0xff0000; // Red hot
-      }
+      // Use program-specific color for consistency across visualizations
+      const color = programColors.get(program) || 0x8b5cf6;
 
       const geometry = new THREE.BoxGeometry(barWidth, segmentHeight, barDepth);
       const material = new THREE.MeshStandardMaterial({
         color,
         emissive: color,
-        emissiveIntensity: 0.5 + heightRatio * 0.5,
+        emissiveIntensity: 0.6,
         metalness: 0.3,
         roughness: 0.4,
       });
@@ -277,6 +268,15 @@ export class StackedBars3D extends BaseVisualization {
 
     // Decay program data for smooth transitions
     this.dataProcessor.decayVolumes(0.9);
+  }
+
+  getLegend(): LegendItem[] {
+    return [
+      { label: 'Segment Color', color: 0x00CED1, description: 'Program identity (Jupiter, Raydium, etc.)' },
+      { label: 'Segment Height', color: 0x8b5cf6, description: 'Program volume share in time slice' },
+      { label: 'Bar Height', color: 0xff6600, description: 'Total volume in that period' },
+      { label: 'Scroll Speed', color: 0xffffff, description: 'Network activity level' },
+    ];
   }
 
   dispose(): void {

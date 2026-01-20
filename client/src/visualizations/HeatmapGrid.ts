@@ -3,6 +3,8 @@ import { BaseVisualization } from '../core/BaseVisualization';
 import { programColors, tokenColors, hashColor, volumeHeatmap, txTypeColors } from '../utils/colors';
 import type { TradeMessage, BlockMessage } from '../../../shared/types';
 import type { BlockData } from '../types';
+import type { LegendItem } from '../hud/Legend';
+import type { DataProcessor } from '../data/DataProcessor';
 
 /**
  * HeatmapGrid - 3D matrix showing program × token trading volume
@@ -19,7 +21,7 @@ export class HeatmapGrid extends BaseVisualization {
   private cells: Map<string, GridCell> = new Map();
   private gridFloor: THREE.GridHelper;
   private programs = ['JUP', 'RAYDIUM_CLMM', 'RAYDIUM_CP', 'ORCA', 'PHOENIX', 'LIFINITY', 'FLASH'];
-  private tokens = ['SOL', 'USDC', 'USDT'];
+  private tokens = ['SOL', 'USDC', 'USDT', 'BONK', 'JUP', 'WIF']; // Expanded to 6 tokens
   private rippleWave: number = 0;
   private rippleOrigin: { x: number; z: number } | null = null;
   private cameraAngle: number = 0;
@@ -34,15 +36,40 @@ export class HeatmapGrid extends BaseVisualization {
   private ambientLight!: THREE.AmbientLight;
   private spotLight!: THREE.SpotLight;
 
+  // Shadow-casting light reference
+  private shadowLight!: THREE.DirectionalLight;
+  private shadowFloor!: THREE.Mesh;
+
+  // Labels
+  private labels: THREE.Sprite[] = [];
+
+
   constructor() {
     super();
+
+    // Enable shadow maps on renderer
+    this.renderer.shadowMap.enabled = true;
+    this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 
     this.camera.position.set(30, 40, 30);
     this.camera.lookAt(0, 0, 0);
 
-    // Create synthwave grid floor
+    // Shadow-receiving floor
+    const floorGeometry = new THREE.PlaneGeometry(60, 60);
+    const floorMaterial = new THREE.MeshStandardMaterial({
+      color: 0x0a0a1e,
+      roughness: 0.9,
+      metalness: 0.1,
+    });
+    this.shadowFloor = new THREE.Mesh(floorGeometry, floorMaterial);
+    this.shadowFloor.rotation.x = -Math.PI / 2;
+    this.shadowFloor.position.y = -1;
+    this.shadowFloor.receiveShadow = true;
+    this.scene.add(this.shadowFloor);
+
+    // Create synthwave grid floor overlay
     this.gridFloor = new THREE.GridHelper(60, 30, 0x8b5cf6, 0xff006e);
-    this.gridFloor.position.y = -1;
+    this.gridFloor.position.y = -0.99;
     this.gridFloor.material.opacity = 0.5;
     this.gridFloor.material.transparent = true;
     this.scene.add(this.gridFloor);
@@ -71,6 +98,8 @@ export class HeatmapGrid extends BaseVisualization {
 
         const mesh = new THREE.Mesh(geometry, material);
         mesh.position.set(x, 0, z);
+        mesh.castShadow = true;
+        mesh.receiveShadow = true;
 
         // Add edges
         const edges = new THREE.EdgesGeometry(geometry);
@@ -102,6 +131,158 @@ export class HeatmapGrid extends BaseVisualization {
     this.spotLight.position.set(0, 50, 0);
     this.spotLight.angle = Math.PI / 4;
     this.scene.add(this.spotLight);
+
+    // Shadow-casting directional light
+    this.shadowLight = new THREE.DirectionalLight(0xffffff, 0.5);
+    this.shadowLight.position.set(20, 40, 20);
+    this.shadowLight.castShadow = true;
+    this.shadowLight.shadow.mapSize.width = 1024;
+    this.shadowLight.shadow.mapSize.height = 1024;
+    this.shadowLight.shadow.camera.near = 1;
+    this.shadowLight.shadow.camera.far = 80;
+    this.shadowLight.shadow.camera.left = -40;
+    this.shadowLight.shadow.camera.right = 40;
+    this.shadowLight.shadow.camera.top = 40;
+    this.shadowLight.shadow.camera.bottom = -40;
+    this.shadowLight.shadow.bias = -0.001;
+    this.scene.add(this.shadowLight);
+
+    // Create labels for rows (programs) and columns (tokens)
+    this.createLabels();
+  }
+
+  /**
+   * Override init to preload from cached network state
+   */
+  init(container: HTMLElement, dataProcessor: DataProcessor): void {
+    super.init(container, dataProcessor);
+    this.preloadFromCache();
+  }
+
+  /**
+   * Fetch cached network state and initialize cell heights
+   */
+  private async preloadFromCache(): Promise<void> {
+    try {
+      const response = await fetch('/api/network-state');
+      if (response.ok) {
+        const state = await response.json();
+        this.initializeFromCache(state);
+      }
+    } catch (err) {
+      console.warn('HeatmapGrid: Could not fetch network state for preloading');
+    }
+  }
+
+  /**
+   * Initialize cell heights from cached network state
+   */
+  private initializeFromCache(state: {
+    topPrograms: Array<{ id: string; volume: number; trades: number }>;
+    topTokens: Array<{ id: string; volume: number; trades: number }>;
+  }): void {
+    if (!state.topPrograms || !state.topTokens) return;
+
+    // Create a volume distribution across known cells
+    // This gives an immediate visual without needing exact pair data
+    const programVolumes = new Map(state.topPrograms.map(p => [p.id, p.volume]));
+    const tokenVolumes = new Map(state.topTokens.map(t => [t.id, t.volume]));
+
+    let updatedCells = 0;
+    const maxHeight = 15;
+
+    this.cells.forEach((cell, key) => {
+      const progVol = programVolumes.get(cell.program) || 0;
+      const tokVol = tokenVolumes.get(cell.token) || 0;
+
+      if (progVol > 0 && tokVol > 0) {
+        // Estimate cell volume as geometric mean of program and token volumes
+        // This distributes the cached data across the grid plausibly
+        const estimatedVolume = Math.sqrt(progVol * tokVol) / 100;
+
+        if (estimatedVolume > 0) {
+          cell.volume = estimatedVolume;
+          const volumeLog = Math.log10(Math.max(1, estimatedVolume));
+          cell.targetHeight = Math.min(maxHeight, 0.1 + volumeLog * 1.5);
+          cell.currentHeight = cell.targetHeight * 0.5; // Start partway up for animation
+          updatedCells++;
+        }
+      }
+    });
+
+    console.log(`HeatmapGrid: Preloaded ${updatedCells} cells with initial heights from cache`);
+  }
+
+  /**
+   * Create axis labels for the grid
+   */
+  private createLabels(): void {
+    const cellSpacing = 4;
+    const gridWidth = this.programs.length * cellSpacing;
+    const gridDepth = this.tokens.length * cellSpacing;
+    const startX = -gridWidth / 2;
+    const startZ = -gridDepth / 2;
+
+    // Program labels (Y-axis / rows) - on the left side (use IDs directly)
+    this.programs.forEach((program, i) => {
+      const label = this.createTextSprite(
+        program,
+        programColors.get(program) || 0xffffff
+      );
+      label.position.set(startX - 6, 1, startZ + i * cellSpacing);
+      label.scale.set(8, 2, 1);
+      this.scene.add(label);
+      this.labels.push(label);
+    });
+
+    // Token labels (X-axis / columns) - on the front
+    this.tokens.forEach((token, j) => {
+      const label = this.createTextSprite(
+        token,
+        tokenColors.get(token) || 0xffffff
+      );
+      label.position.set(startX + j * cellSpacing, 1, startZ - 4);
+      label.scale.set(6, 2, 1);
+      this.scene.add(label);
+      this.labels.push(label);
+    });
+  }
+
+  /**
+   * Create a text sprite label
+   */
+  private createTextSprite(text: string, color: number): THREE.Sprite {
+    const canvas = document.createElement('canvas');
+    const context = canvas.getContext('2d')!;
+    canvas.width = 256;
+    canvas.height = 64;
+
+    context.clearRect(0, 0, canvas.width, canvas.height);
+    context.font = 'bold 28px Arial';
+    context.textAlign = 'center';
+    context.textBaseline = 'middle';
+
+    const hexColor = '#' + color.toString(16).padStart(6, '0');
+
+    // Text shadow for visibility
+    context.shadowColor = 'rgba(0, 0, 0, 0.8)';
+    context.shadowBlur = 4;
+    context.shadowOffsetX = 2;
+    context.shadowOffsetY = 2;
+
+    context.fillStyle = hexColor;
+    context.fillText(text, canvas.width / 2, canvas.height / 2);
+
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.needsUpdate = true;
+
+    const material = new THREE.SpriteMaterial({
+      map: texture,
+      transparent: true,
+      depthTest: false,
+    });
+
+    return new THREE.Sprite(material);
   }
 
   getName(): string {
@@ -204,8 +385,8 @@ export class HeatmapGrid extends BaseVisualization {
       // Lerp height
       cell.currentHeight += (cell.targetHeight - cell.currentHeight) * 0.1;
 
-      // Decay target for smooth fall-off
-      cell.targetHeight *= 0.98;
+      // Decay target for smooth fall-off (slower decay for longer visibility)
+      cell.targetHeight *= 0.995;
 
       // Update mesh
       cell.mesh.scale.y = cell.currentHeight;
@@ -251,6 +432,16 @@ export class HeatmapGrid extends BaseVisualization {
     this.camera.lookAt(0, 5, 0);
   }
 
+  getLegend(): LegendItem[] {
+    return [
+      { label: 'Cell Height', color: 0x00CED1, description: 'Trade volume (log scale)' },
+      { label: 'Blue → Pink', color: 0x0044ff, description: 'Low → High volume' },
+      { label: 'Rows', color: 0x8b5cf6, description: 'DEX Programs (Jupiter, Raydium, etc.)' },
+      { label: 'Columns', color: 0xffffff, description: 'Tokens (SOL, USDC, etc.)' },
+      { label: 'Wave Effect', color: 0xff006e, description: 'New block arrival' },
+    ];
+  }
+
   dispose(): void {
     this.cells.forEach(cell => {
       this.scene.remove(cell.mesh);
@@ -258,6 +449,14 @@ export class HeatmapGrid extends BaseVisualization {
       (cell.mesh.material as THREE.Material).dispose();
     });
     this.cells.clear();
+
+    // Dispose labels
+    this.labels.forEach(label => {
+      this.scene.remove(label);
+      (label.material as THREE.SpriteMaterial).map?.dispose();
+      (label.material as THREE.SpriteMaterial).dispose();
+    });
+    this.labels = [];
 
     super.dispose();
   }

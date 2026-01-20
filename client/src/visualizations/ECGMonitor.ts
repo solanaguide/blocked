@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { BaseVisualization } from '../core/BaseVisualization';
 import type { TradeMessage, BlockMessage } from '../../../shared/types';
 import type { BlockData } from '../types';
+import type { LegendItem } from '../hud/Legend';
 
 /**
  * ECGMonitor - ECG/heartbeat style display for network activity
@@ -278,6 +279,16 @@ export class ECGMonitor extends BaseVisualization {
     const intensity = Math.abs(value - waveform.yOffset);
     const heatColor = intensity > 5 ? 0xff0000 : intensity > 3 ? 0xffff00 : waveform.baseColor;
     (waveform.line.material as THREE.LineBasicMaterial).color.setHex(heatColor);
+  }
+
+  getLegend(): LegendItem[] {
+    return [
+      { label: 'Green Line', color: 0x00ff00, description: 'Trade volume (USD, log scale)' },
+      { label: 'Cyan Line', color: 0x00ddff, description: 'Trade count' },
+      { label: 'Magenta Line', color: 0xff00ff, description: 'Unique programs' },
+      { label: 'Spike Height', color: 0xffffff, description: 'Activity intensity' },
+      { label: 'Grid Flash', color: 0x00ff00, description: 'Block completion' },
+    ];
   }
 
   dispose(): void {

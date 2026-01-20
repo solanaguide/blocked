@@ -16,6 +16,28 @@ const clients = new Set<WebSocket>();
 let redisConnected = false;
 const startTime = Date.now();
 
+// Network state cache for instant visualization startup
+interface NetworkStateCache {
+  topPrograms: Map<string, { volume: number; trades: number }>;
+  topTokens: Map<string, { volume: number; trades: number }>;
+  recentVolume: number;
+  recentTrades: number;
+  lastBlockSlot: number;
+  lastBlockTime: number;
+}
+
+const networkCache: NetworkStateCache = {
+  topPrograms: new Map(),
+  topTokens: new Map(),
+  recentVolume: 0,
+  recentTrades: 0,
+  lastBlockSlot: 0,
+  lastBlockTime: 0,
+};
+
+// Decay factor for rolling averages (applied per block)
+const CACHE_DECAY = 0.9;
+
 // CORS configuration
 const corsOrigins = config.cors.origins === '*'
   ? '*'
@@ -33,6 +55,29 @@ app.get('/health', (req, res) => {
     uptime: Math.floor((Date.now() - startTime) / 1000),
     connections: clients.size,
     redis: redisConnected ? 'connected' : 'disconnected',
+  });
+});
+
+// Network state endpoint for instant visualization startup
+app.get('/api/network-state', (req, res) => {
+  // Convert Maps to sorted arrays (top 10)
+  const topPrograms = Array.from(networkCache.topPrograms.entries())
+    .map(([id, data]) => ({ id, volume: data.volume, trades: data.trades }))
+    .sort((a, b) => b.volume - a.volume)
+    .slice(0, 10);
+
+  const topTokens = Array.from(networkCache.topTokens.entries())
+    .map(([id, data]) => ({ id, volume: data.volume, trades: data.trades }))
+    .sort((a, b) => b.volume - a.volume)
+    .slice(0, 10);
+
+  res.json({
+    topPrograms,
+    topTokens,
+    recentVolume: networkCache.recentVolume,
+    recentTrades: networkCache.recentTrades,
+    lastBlockSlot: networkCache.lastBlockSlot,
+    lastBlockTime: networkCache.lastBlockTime,
   });
 });
 
@@ -126,6 +171,27 @@ redisSubscriber.onTrade((rawTrade) => {
     tradesPerSlot.set(slot, []);
   }
   tradesPerSlot.get(slot)!.push(trade);
+
+  // Update network cache with this trade
+  const program = trade.p;
+  const tokenA = trade.ta;
+  const volume = trade.vu;
+
+  // Update program stats
+  const programData = networkCache.topPrograms.get(program) || { volume: 0, trades: 0 };
+  programData.volume += volume;
+  programData.trades += 1;
+  networkCache.topPrograms.set(program, programData);
+
+  // Update token stats (token A is the primary traded token)
+  const tokenData = networkCache.topTokens.get(tokenA) || { volume: 0, trades: 0 };
+  tokenData.volume += volume;
+  tokenData.trades += 1;
+  networkCache.topTokens.set(tokenA, tokenData);
+
+  // Update recent totals
+  networkCache.recentVolume += volume;
+  networkCache.recentTrades += 1;
 });
 
 // Transform raw Redis block data into BlockMessage format
@@ -215,6 +281,33 @@ redisSubscriber.onBlock((rawBlock) => {
   // Get accumulated trades for this slot
   const trades = tradesPerSlot.get(slot) || [];
   const blockMessage = transformBlockData(rawBlock, trades);
+
+  // Update network cache block info
+  networkCache.lastBlockSlot = slot;
+  networkCache.lastBlockTime = rawBlock.block_time;
+
+  // Apply decay to cache values (rolling window effect)
+  networkCache.recentVolume *= CACHE_DECAY;
+  networkCache.recentTrades *= CACHE_DECAY;
+
+  // Decay program and token volumes
+  networkCache.topPrograms.forEach((data, program) => {
+    data.volume *= CACHE_DECAY;
+    data.trades *= CACHE_DECAY;
+    // Remove entries with negligible values
+    if (data.volume < 0.01 && data.trades < 0.01) {
+      networkCache.topPrograms.delete(program);
+    }
+  });
+
+  networkCache.topTokens.forEach((data, token) => {
+    data.volume *= CACHE_DECAY;
+    data.trades *= CACHE_DECAY;
+    // Remove entries with negligible values
+    if (data.volume < 0.01 && data.trades < 0.01) {
+      networkCache.topTokens.delete(token);
+    }
+  });
 
   // Diagnostic log - show what slots we have trades for
   const trackedSlots = Array.from(tradesPerSlot.keys()).sort((a, b) => b - a).slice(0, 5);

@@ -3,6 +3,8 @@ import { BaseVisualization } from '../core/BaseVisualization';
 import { programColors, txTypeColors } from '../utils/colors';
 import type { TradeMessage, BlockMessage } from '../../../shared/types';
 import type { BlockData } from '../types';
+import type { LegendItem } from '../hud/Legend';
+import type { DataProcessor } from '../data/DataProcessor';
 
 /**
  * DoubleSidedEQ - Mirror EQ bars showing TWO different metrics
@@ -50,6 +52,58 @@ export class DoubleSidedEQ extends BaseVisualization {
     // Lighting
     this.ambientLight = new THREE.AmbientLight(0x8b5cf6, 0.4);
     this.scene.add(this.ambientLight);
+  }
+
+  /**
+   * Override init to preload from cached network state
+   */
+  init(container: HTMLElement, dataProcessor: DataProcessor): void {
+    super.init(container, dataProcessor);
+    this.preloadFromCache();
+  }
+
+  /**
+   * Fetch cached network state and initialize bars immediately
+   */
+  private async preloadFromCache(): Promise<void> {
+    try {
+      const response = await fetch('/api/network-state');
+      if (response.ok) {
+        const state = await response.json();
+        this.initializeFromCache(state);
+      }
+    } catch (err) {
+      console.warn('DoubleSidedEQ: Could not fetch network state for preloading');
+    }
+  }
+
+  /**
+   * Initialize bars from cached network state
+   */
+  private initializeFromCache(state: {
+    topPrograms: Array<{ id: string; volume: number; trades: number }>;
+  }): void {
+    if (!state.topPrograms || state.topPrograms.length === 0) return;
+
+    const maxHeight = 15;
+
+    // Initialize program data from cache
+    state.topPrograms.slice(0, this.maxBars).forEach(p => {
+      const tradesLog = Math.log10(Math.max(1, p.trades));
+      const volumeLog = Math.log10(Math.max(1, p.volume));
+
+      this.programData.set(p.id, {
+        volume: p.volume,
+        trades: p.trades,
+        targetTrades: Math.min(maxHeight, 0.1 + tradesLog * 3),
+        targetVolume: Math.min(maxHeight, 0.1 + volumeLog * 1.5),
+      });
+    });
+
+    // Create bars immediately
+    this.updateBars();
+
+    console.log(`DoubleSidedEQ: Preloaded ${this.bars.size} bars from cache`);
   }
 
   getName(): string {
@@ -232,6 +286,16 @@ export class DoubleSidedEQ extends BaseVisualization {
       currentTradesHeight: 0.1,
       currentVolumeHeight: 0.1,
     });
+  }
+
+  getLegend(): LegendItem[] {
+    return [
+      { label: 'Top Bars (↑)', color: 0x00CED1, description: 'Trade count (log scale)' },
+      { label: 'Bottom Bars (↓)', color: 0x8b5cf6, description: 'Trade volume USD (log scale)' },
+      { label: 'Bar Color', color: 0xff006e, description: 'Program identity' },
+      { label: 'Center Line', color: 0x8b5cf6, description: 'Zero baseline' },
+      { label: 'Pulse Effect', color: 0xffffff, description: 'Block completion' },
+    ];
   }
 
   dispose(): void {

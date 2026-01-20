@@ -3,6 +3,7 @@ import { BaseVisualization } from '../core/BaseVisualization';
 import { txTypeColors, volumeHeatmap } from '../utils/colors';
 import type { TradeMessage, BlockMessage } from '../../../shared/types';
 import type { BlockData } from '../types';
+import type { LegendItem } from '../hud/Legend';
 
 /**
  * EconomicPulse - Network heartbeat visualization
@@ -16,6 +17,8 @@ import type { BlockData } from '../types';
  *   - Outer: Revenue glow (golden)
  * - Pulse animation on each block
  * - Shockwave particles emanating on block complete
+ *
+ * PERFORMANCE: Uses InstancedMesh for trade particles → 1 draw call
  */
 export class EconomicPulse extends BaseVisualization {
   // Central orb
@@ -33,15 +36,10 @@ export class EconomicPulse extends BaseVisualization {
   private targetPulseScale = 1.0;
   private shockwaves: THREE.Mesh[] = [];
 
-  // Trade particles orbiting
-  private tradeParticles: {
-    mesh: THREE.Mesh;
-    angle: number;
-    radius: number;
-    speed: number;
-    lifetime: number;
-  }[] = [];
+  // Trade particles using InstancedMesh
   private maxParticles = 100;
+  private particleData: TradeParticleData[] = [];
+  private instancedMesh: THREE.InstancedMesh;
 
   // Block metrics (cached for smooth interpolation)
   private blockVolume = 0;
@@ -57,6 +55,13 @@ export class EconomicPulse extends BaseVisualization {
 
   // Camera animation
   private cameraAngle = 0;
+
+  // Reusable objects to avoid GC pressure
+  private readonly _tempMatrix = new THREE.Matrix4();
+  private readonly _tempPosition = new THREE.Vector3();
+  private readonly _tempQuaternion = new THREE.Quaternion();
+  private readonly _tempScale = new THREE.Vector3();
+  private readonly _tempColor = new THREE.Color();
 
   constructor() {
     super();
@@ -109,6 +114,35 @@ export class EconomicPulse extends BaseVisualization {
     const gridHelper = new THREE.GridHelper(100, 50, 0x004444, 0x002222);
     gridHelper.position.y = -15;
     this.scene.add(gridHelper);
+
+    // Create InstancedMesh for trade particles
+    const particleGeometry = new THREE.SphereGeometry(1, 8, 8);
+    const particleMaterial = new THREE.MeshStandardMaterial({
+      color: 0xffffff,
+      emissive: 0xffffff,
+      emissiveIntensity: 1.2,
+      transparent: true,
+      opacity: 0.9,
+    });
+
+    this.instancedMesh = new THREE.InstancedMesh(particleGeometry, particleMaterial, this.maxParticles);
+    this.instancedMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+
+    // Enable per-instance colors
+    this.instancedMesh.instanceColor = new THREE.InstancedBufferAttribute(
+      new Float32Array(this.maxParticles * 3),
+      3
+    );
+    this.instancedMesh.instanceColor.setUsage(THREE.DynamicDrawUsage);
+
+    // Initialize all instances as invisible
+    for (let i = 0; i < this.maxParticles; i++) {
+      this._tempMatrix.makeScale(0, 0, 0);
+      this.instancedMesh.setMatrixAt(i, this._tempMatrix);
+    }
+    this.instancedMesh.instanceMatrix.needsUpdate = true;
+
+    this.scene.add(this.instancedMesh);
   }
 
   private createRing(radius: number, tubeRadius: number, color: number): THREE.Mesh {
@@ -157,44 +191,71 @@ export class EconomicPulse extends BaseVisualization {
 
   onTrade(trade: TradeMessage, slot: number): void {
     // Spawn orbiting particle for trade
-    if (this.tradeParticles.length < this.maxParticles) {
+    if (this.particleData.length < this.maxParticles) {
       this.spawnTradeParticle(trade);
     }
   }
 
   private spawnTradeParticle(trade: TradeMessage): void {
     const size = 0.2 + Math.log10(Math.max(1, trade.vu)) * 0.15;
-    const geometry = new THREE.SphereGeometry(size, 8, 8);
     const color = volumeHeatmap(trade.vu);
-    const material = new THREE.MeshStandardMaterial({
-      color: color,
-      emissive: color,
-      emissiveIntensity: 1.2,
-      transparent: true,
-      opacity: 0.9,
-    });
-
-    const mesh = new THREE.Mesh(geometry, material);
 
     // Random orbit parameters
     const radius = 8 + Math.random() * 15;
     const angle = Math.random() * Math.PI * 2;
     const speed = 0.0005 + Math.random() * 0.001;
+    const y = (Math.random() - 0.5) * 6;
 
-    mesh.position.set(
+    const position = new THREE.Vector3(
       Math.cos(angle) * radius,
-      (Math.random() - 0.5) * 6,
+      y,
       Math.sin(angle) * radius
     );
 
-    this.scene.add(mesh);
-    this.tradeParticles.push({
-      mesh,
-      angle,
-      radius,
-      speed,
-      lifetime: 8000 + Math.random() * 4000,
-    });
+    // Find available slot or replace oldest
+    let instanceIndex: number;
+    if (this.particleData.length < this.maxParticles) {
+      instanceIndex = this.particleData.length;
+      this.particleData.push({
+        instanceIndex,
+        position,
+        angle,
+        radius,
+        speed,
+        y,
+        lifetime: 8000 + Math.random() * 4000,
+        age: 0,
+        size,
+        color,
+        opacity: 0.9,
+      });
+    } else {
+      // Replace oldest
+      const oldest = this.particleData.shift()!;
+      instanceIndex = oldest.instanceIndex;
+      this.particleData.push({
+        instanceIndex,
+        position,
+        angle,
+        radius,
+        speed,
+        y,
+        lifetime: 8000 + Math.random() * 4000,
+        age: 0,
+        size,
+        color,
+        opacity: 0.9,
+      });
+    }
+
+    // Update instance
+    this._tempPosition.copy(position);
+    this._tempScale.setScalar(size);
+    this._tempMatrix.compose(this._tempPosition, this._tempQuaternion, this._tempScale);
+    this.instancedMesh.setMatrixAt(instanceIndex, this._tempMatrix);
+
+    this._tempColor.setHex(color);
+    this.instancedMesh.setColorAt(instanceIndex, this._tempColor);
   }
 
   onBlockComplete(blockData: BlockData, oldSlot: number, newSlot: number): void {
@@ -303,32 +364,42 @@ export class EconomicPulse extends BaseVisualization {
     this.middleRing.rotation.x = Math.PI / 2 + Math.sin(time * 0.3 + 1) * 0.04;
     this.outerRing.rotation.x = Math.PI / 2 + Math.sin(time * 0.2 + 2) * 0.03;
 
-    // Update trade particles
-    for (let i = this.tradeParticles.length - 1; i >= 0; i--) {
-      const particle = this.tradeParticles[i];
-      particle.lifetime -= deltaTime;
+    // Update trade particles (InstancedMesh)
+    let needsMatrixUpdate = false;
+    for (let i = this.particleData.length - 1; i >= 0; i--) {
+      const particle = this.particleData[i];
+      particle.age += deltaTime;
       particle.angle += particle.speed * deltaTime;
 
       // Orbit around center
-      particle.mesh.position.x = Math.cos(particle.angle) * particle.radius;
-      particle.mesh.position.z = Math.sin(particle.angle) * particle.radius;
+      particle.position.x = Math.cos(particle.angle) * particle.radius;
+      particle.position.z = Math.sin(particle.angle) * particle.radius;
 
       // Gentle vertical oscillation
-      particle.mesh.position.y += Math.sin(time * 2 + particle.angle) * 0.01;
+      particle.position.y = particle.y + Math.sin(time * 2 + particle.angle) * 0.5;
 
       // Fade out as lifetime decreases
-      if (particle.lifetime < 2000) {
-        const opacity = particle.lifetime / 2000;
-        (particle.mesh.material as THREE.MeshStandardMaterial).opacity = opacity;
+      if (particle.age > particle.lifetime - 2000) {
+        particle.opacity = (particle.lifetime - particle.age) / 2000;
       }
 
+      // Update instance matrix
+      this._tempPosition.copy(particle.position);
+      this._tempScale.setScalar(particle.size * Math.max(0.01, particle.opacity));
+      this._tempMatrix.compose(this._tempPosition, this._tempQuaternion, this._tempScale);
+      this.instancedMesh.setMatrixAt(particle.instanceIndex, this._tempMatrix);
+      needsMatrixUpdate = true;
+
       // Remove dead particles
-      if (particle.lifetime <= 0) {
-        this.scene.remove(particle.mesh);
-        particle.mesh.geometry.dispose();
-        (particle.mesh.material as THREE.Material).dispose();
-        this.tradeParticles.splice(i, 1);
+      if (particle.age >= particle.lifetime) {
+        this._tempMatrix.makeScale(0, 0, 0);
+        this.instancedMesh.setMatrixAt(particle.instanceIndex, this._tempMatrix);
+        this.particleData.splice(i, 1);
       }
+    }
+
+    if (needsMatrixUpdate) {
+      this.instancedMesh.instanceMatrix.needsUpdate = true;
     }
 
     // Update shockwaves
@@ -358,14 +429,24 @@ export class EconomicPulse extends BaseVisualization {
     this.camera.lookAt(0, 0, 0);
   }
 
+  getLegend(): LegendItem[] {
+    return [
+      { label: 'Central Orb', color: 0x00CED1, description: 'Network activity (size = volume)' },
+      { label: 'Orb Brightness', color: 0xffffff, description: 'Total revenue (fees + jito)' },
+      { label: 'Inner Ring', color: txTypeColors.completed, description: 'Swap volume (cyan)' },
+      { label: 'Middle Ring', color: 0x20B2AA, description: 'Transfer volume (teal)' },
+      { label: 'Outer Ring', color: txTypeColors.vote, description: 'Revenue glow (golden)' },
+      { label: 'Shockwave', color: 0x00CED1, description: 'New block arrival pulse' },
+      { label: 'Orbiting Particles', color: 0xff006e, description: 'Individual trades' },
+    ];
+  }
+
   dispose(): void {
-    // Clean up trade particles
-    this.tradeParticles.forEach(particle => {
-      this.scene.remove(particle.mesh);
-      particle.mesh.geometry.dispose();
-      (particle.mesh.material as THREE.Material).dispose();
-    });
-    this.tradeParticles = [];
+    // Clean up instanced mesh
+    this.instancedMesh.geometry.dispose();
+    (this.instancedMesh.material as THREE.Material).dispose();
+    this.scene.remove(this.instancedMesh);
+    this.particleData = [];
 
     // Clean up shockwaves
     this.shockwaves.forEach(shockwave => {
@@ -377,4 +458,18 @@ export class EconomicPulse extends BaseVisualization {
 
     super.dispose();
   }
+}
+
+interface TradeParticleData {
+  instanceIndex: number;
+  position: THREE.Vector3;
+  angle: number;
+  radius: number;
+  speed: number;
+  y: number;
+  lifetime: number;
+  age: number;
+  size: number;
+  color: number;
+  opacity: number;
 }

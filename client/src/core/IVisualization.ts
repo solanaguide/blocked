@@ -1,6 +1,7 @@
 import type { TradeMessage, BlockMessage } from '../../../shared/types';
 import type { BlockData, FocusMode, ParticleShape } from '../types';
 import type { DataProcessor } from '../data/DataProcessor';
+import type { LegendItem } from '../hud/Legend';
 
 /**
  * HUD configuration interface
@@ -85,4 +86,10 @@ export interface IVisualization {
    * Used for multi-dimensional scaling based on Volume, Revenue, tx composition
    */
   onBlockData?(block: BlockMessage): void;
+
+  /**
+   * Get legend items explaining this visualization's visual language.
+   * Returns array of items describing what visual elements mean.
+   */
+  getLegend(): LegendItem[];
 }

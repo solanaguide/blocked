@@ -3,6 +3,7 @@ import { BaseVisualization } from '../core/BaseVisualization';
 import { volumeHeatmap } from '../utils/colors';
 import type { TradeMessage } from '../../../shared/types';
 import type { BlockData } from '../types';
+import type { LegendItem } from '../hud/Legend';
 
 /**
  * VRTunnel - Flying through an infinite neon tunnel (Tron aesthetic)
@@ -70,7 +71,7 @@ export class VRTunnel extends BaseVisualization {
     this.scene.add(stars);
   }
 
-  private createRing(z: number, color: number, thickness: number): void {
+  private createRing(z: number, color: number, thickness: number, volume?: number): void {
     const segments = 32;
     const radius = 15;
 
@@ -107,11 +108,66 @@ export class VRTunnel extends BaseVisualization {
     this.scene.add(mesh);
     this.scene.add(edgeMesh);
 
+    // Add volume label if significant volume
+    let label: THREE.Sprite | undefined;
+    if (volume && volume > 10000) {
+      label = this.createVolumeLabel(volume);
+      label.position.set(0, radius + 2, z);
+      this.scene.add(label);
+    }
+
     this.rings.push({
       mesh,
       edgeMesh,
       baseZ: z,
+      label,
     });
+  }
+
+  /**
+   * Create a volume label sprite
+   */
+  private createVolumeLabel(volume: number): THREE.Sprite {
+    const canvas = document.createElement('canvas');
+    const context = canvas.getContext('2d')!;
+    canvas.width = 128;
+    canvas.height = 32;
+
+    context.clearRect(0, 0, canvas.width, canvas.height);
+    context.font = 'bold 18px Arial';
+    context.textAlign = 'center';
+    context.textBaseline = 'middle';
+
+    // Format volume
+    let text: string;
+    if (volume >= 1e6) {
+      text = `$${(volume / 1e6).toFixed(1)}M`;
+    } else if (volume >= 1e3) {
+      text = `$${(volume / 1e3).toFixed(0)}K`;
+    } else {
+      text = `$${volume.toFixed(0)}`;
+    }
+
+    // Text shadow
+    context.shadowColor = 'rgba(0, 0, 0, 0.8)';
+    context.shadowBlur = 3;
+
+    context.fillStyle = '#00CED1';
+    context.fillText(text, canvas.width / 2, canvas.height / 2);
+
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.needsUpdate = true;
+
+    const material = new THREE.SpriteMaterial({
+      map: texture,
+      transparent: true,
+      depthTest: false,
+    });
+
+    const sprite = new THREE.Sprite(material);
+    sprite.scale.set(6, 1.5, 1);
+
+    return sprite;
   }
 
   getName(): string {
@@ -133,11 +189,12 @@ export class VRTunnel extends BaseVisualization {
 
     // Create new ring with volume-based color
     const color = volumeHeatmap(this.currentBlockVolume);
-    const thickness = Math.min(3, 1 + this.currentBlockTrades / 50);
+    // More dramatic thickness range: 1 to 5 based on trade count
+    const thickness = Math.min(5, 1 + this.currentBlockTrades / 30);
 
     // Find furthest ring
     const furthestZ = Math.min(...this.rings.map(r => r.mesh.position.z));
-    this.createRing(furthestZ - 10, color, thickness);
+    this.createRing(furthestZ - 10, color, thickness, this.currentBlockVolume);
 
     // Reset counters
     this.currentBlockVolume = 0;
@@ -158,6 +215,9 @@ export class VRTunnel extends BaseVisualization {
     this.rings.forEach((ring, index) => {
       ring.mesh.position.z += this.tunnelSpeed;
       ring.edgeMesh.position.z += this.tunnelSpeed;
+      if (ring.label) {
+        ring.label.position.z += this.tunnelSpeed;
+      }
 
       // Pulse opacity based on whoosh
       const pulseFactor = 1 + this.whooshEffect * 0.3;
@@ -175,6 +235,11 @@ export class VRTunnel extends BaseVisualization {
         (ring.mesh.material as THREE.Material).dispose();
         ring.edgeMesh.geometry.dispose();
         (ring.edgeMesh.material as THREE.Material).dispose();
+        if (ring.label) {
+          this.scene.remove(ring.label);
+          (ring.label.material as THREE.SpriteMaterial).map?.dispose();
+          (ring.label.material as THREE.SpriteMaterial).dispose();
+        }
         this.rings.splice(index, 1);
 
         // Create new ring far ahead to maintain infinite tunnel
@@ -198,6 +263,16 @@ export class VRTunnel extends BaseVisualization {
     this.camera.rotation.z = Math.sin(time * 0.2) * 0.05;
   }
 
+  getLegend(): LegendItem[] {
+    return [
+      { label: 'Ring Color', color: 0x8b5cf6, description: 'Block volume (blue→pink→red = low→high)' },
+      { label: 'Ring Thickness', color: 0x00CED1, description: 'Number of trades in block (thin→thick)' },
+      { label: 'Flight Speed', color: 0xffffff, description: 'Current trading activity' },
+      { label: 'Volume Label', color: 0x00CED1, description: 'USD volume for significant blocks' },
+      { label: 'Whoosh Effect', color: 0xff006e, description: 'New block arrival' },
+    ];
+  }
+
   dispose(): void {
     this.rings.forEach(ring => {
       this.scene.remove(ring.mesh);
@@ -206,6 +281,11 @@ export class VRTunnel extends BaseVisualization {
       (ring.mesh.material as THREE.Material).dispose();
       ring.edgeMesh.geometry.dispose();
       (ring.edgeMesh.material as THREE.Material).dispose();
+      if (ring.label) {
+        this.scene.remove(ring.label);
+        (ring.label.material as THREE.SpriteMaterial).map?.dispose();
+        (ring.label.material as THREE.SpriteMaterial).dispose();
+      }
     });
     this.rings = [];
 
@@ -217,4 +297,5 @@ interface TunnelRing {
   mesh: THREE.Mesh;
   edgeMesh: THREE.Mesh;
   baseZ: number;
+  label?: THREE.Sprite;
 }

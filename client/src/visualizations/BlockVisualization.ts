@@ -3,8 +3,10 @@ import { BaseVisualization } from '../core/BaseVisualization';
 import { Environment } from '../scene/Environment';
 import { ParticleSystem } from '../scene/ParticleSystem';
 import { BlockBuilder } from '../scene/BlockBuilder';
+import { txTypeColors } from '../utils/colors';
 import type { TradeMessage, BlockMessage } from '../../../shared/types';
 import type { FocusMode, ParticleShape, BlockData } from '../types';
+import type { LegendItem } from '../hud/Legend';
 
 /**
  * BlockVisualization - The original falling particles visualization
@@ -202,6 +204,17 @@ export class BlockVisualization extends BaseVisualization {
   toggleVoteParticles(): boolean {
     this.showVoteParticles = !this.showVoteParticles;
     return this.showVoteParticles;
+  }
+
+  getLegend(): LegendItem[] {
+    return [
+      { label: 'Gold Particles', color: txTypeColors.vote, description: 'Vote transactions (consensus)' },
+      { label: 'Cyan Particles', color: txTypeColors.completed, description: 'Completed transactions' },
+      { label: 'Amber Particles', color: txTypeColors.reverted, description: 'Reverted transactions' },
+      { label: 'Orange Particles', color: txTypeColors.jito, description: 'MEV (Jito) transactions' },
+      { label: 'Block Polygon', color: 0x8b5cf6, description: 'Completed block structure' },
+      { label: 'Particle Size', color: 0xffffff, description: 'Trade volume (log scale)' },
+    ];
   }
 
   /**
