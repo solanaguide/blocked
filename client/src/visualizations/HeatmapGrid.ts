@@ -428,8 +428,8 @@ export class HeatmapGrid extends BaseVisualization {
     const radius = 45;
     this.camera.position.x = Math.cos(this.cameraAngle) * radius;
     this.camera.position.z = Math.sin(this.cameraAngle) * radius;
-    this.camera.position.y = 40 + Math.sin(time * 0.3) * 5;
-    this.camera.lookAt(0, 5, 0);
+    this.camera.position.y = 40 + Math.sin(time * 0.3) * 5 + this.getCameraOffsetY();
+    this.camera.lookAt(0, 5 + this.getCameraOffsetY() * 0.3, 0);
   }
 
   getLegend(): LegendItem[] {

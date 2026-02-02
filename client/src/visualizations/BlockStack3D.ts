@@ -364,9 +364,9 @@ export class BlockStack3D extends BaseVisualization {
 
     // Fixed isometric camera with subtle vertical float (no orbiting)
     // Blocks march LEFT toward negative X (into the past)
-    const camHeight = 25 + Math.sin(time * 0.1) * 3;
+    const camHeight = 25 + Math.sin(time * 0.1) * 3 + this.getCameraOffsetY();
     this.camera.position.set(50, camHeight, 40);
-    this.camera.lookAt(-20, 0, 0);
+    this.camera.lookAt(-20, this.getCameraOffsetY() * 0.3, 0);
   }
 
   getLegend(): LegendItem[] {

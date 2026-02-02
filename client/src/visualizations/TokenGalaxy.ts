@@ -464,8 +464,8 @@ export class TokenGalaxy extends BaseVisualization {
     const cameraDistance = 80;
     this.camera.position.x = Math.cos(this.cameraAngle) * cameraDistance;
     this.camera.position.z = Math.sin(this.cameraAngle) * cameraDistance;
-    this.camera.position.y = 40 + Math.sin(time * 0.05) * 5; // Slower, smaller vertical movement
-    this.camera.lookAt(0, 0, 0);
+    this.camera.position.y = 40 + Math.sin(time * 0.05) * 5 + this.getCameraOffsetY(); // Slower, smaller vertical movement
+    this.camera.lookAt(0, this.getCameraOffsetY() * 0.3, 0);
   }
 
   getLegend(): LegendItem[] {

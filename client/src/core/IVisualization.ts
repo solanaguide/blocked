@@ -92,4 +92,10 @@ export interface IVisualization {
    * Returns array of items describing what visual elements mean.
    */
   getLegend(): LegendItem[];
+
+  /**
+   * Optional: Set camera Y offset for responsive layouts (e.g., when bottom sheet opens)
+   * @param offsetY Vertical offset in world units (positive = up)
+   */
+  setCameraOffset?(offsetY: number): void;
 }

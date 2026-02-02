@@ -166,7 +166,7 @@ export class StackedBars3D extends BaseVisualization {
     }
 
     // Subtle camera sway
-    this.camera.position.y = 20 + Math.sin(time * 0.0005) * 2;
+    this.camera.position.y = 20 + Math.sin(time * 0.0005) * 2 + this.getCameraOffsetY();
     this.camera.position.z = 50 + Math.sin(time * 0.0003) * 5;
   }
 

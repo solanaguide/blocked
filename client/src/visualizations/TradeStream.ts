@@ -338,7 +338,7 @@ export class TradeStream extends BaseVisualization {
     });
 
     // Subtle camera movement
-    this.camera.position.y = Math.sin(time * 0.3) * 3;
+    this.camera.position.y = Math.sin(time * 0.3) * 3 + this.getCameraOffsetY();
   }
 
   getLegend(): LegendItem[] {

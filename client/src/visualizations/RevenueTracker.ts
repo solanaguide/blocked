@@ -374,8 +374,8 @@ export class RevenueTracker extends BaseVisualization {
     const camRadius = 45;
     this.camera.position.x = Math.cos(this.cameraAngle) * camRadius;
     this.camera.position.z = Math.sin(this.cameraAngle) * camRadius;
-    this.camera.position.y = 20 + Math.sin(time * 0.1) * 5;
-    this.camera.lookAt(0, 0, 0);
+    this.camera.position.y = 20 + Math.sin(time * 0.1) * 5 + this.getCameraOffsetY();
+    this.camera.lookAt(0, this.getCameraOffsetY() * 0.3, 0);
   }
 
   getLegend(): LegendItem[] {

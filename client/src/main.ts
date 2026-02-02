@@ -19,6 +19,8 @@ import { RevenueTracker } from './visualizations/RevenueTracker';
 import { VolumeFlow } from './visualizations/VolumeFlow';
 import { HUD } from './hud/HUD';
 import { Legend } from './hud/Legend';
+import { PanelManager } from './hud/PanelManager';
+import { createSceneGestureHandler } from './utils/TouchGestureHandler';
 import type { WSMessage, BlockMessage } from '../../shared/types';
 import type { FocusMode, ParticleShape } from './types';
 
@@ -28,6 +30,12 @@ const dataProcessor = new DataProcessor();
 const sceneManager = new SceneManager(container, dataProcessor);
 const hud = new HUD();
 const legend = new Legend();
+const panelManager = new PanelManager();
+
+// Wire up camera offset for mobile bottom sheet
+panelManager.setOnCameraOffset((offsetY) => {
+  sceneManager.setCameraOffset(offsetY);
+});
 
 // Helper to update legend when scene changes
 function updateLegendForScene() {
@@ -67,6 +75,30 @@ sceneManager.registerScene('volumeflow', () => new VolumeFlow());
 
 // Start with blocks visualization
 sceneManager.switchScene('blocks');
+
+// Initialize touch gesture handler for mobile scene navigation
+const touchGestureHandler = createSceneGestureHandler(
+  container,
+  () => {
+    // Swipe right -> previous scene
+    sceneManager.previousScene();
+    updateLegendForScene();
+    hud.showNotification(`Scene: ${sceneManager.getActiveSceneName()}`, 2000);
+  },
+  () => {
+    // Swipe left -> next scene
+    sceneManager.nextScene();
+    updateLegendForScene();
+    hud.showNotification(`Scene: ${sceneManager.getActiveSceneName()}`, 2000);
+  },
+  () => {
+    // Swipe up -> open bottom sheet
+    panelManager.showSheet('half');
+  }
+);
+
+// Update legend on initial load
+updateLegendForScene();
 
 // Create worker
 const worker = new Worker(new URL('./worker.ts', import.meta.url), {

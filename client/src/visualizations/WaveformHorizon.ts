@@ -259,7 +259,7 @@ export class WaveformHorizon extends BaseVisualization {
     // Subtle camera sway
     const time = this.clock.getElapsedTime();
     this.camera.position.x = Math.sin(time * 0.2) * 2;
-    this.camera.position.y = 5 + Math.sin(time * 0.3) * 0.5;
+    this.camera.position.y = 5 + Math.sin(time * 0.3) * 0.5 + this.getCameraOffsetY();
   }
 
   getLegend(): LegendItem[] {

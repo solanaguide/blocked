@@ -458,9 +458,9 @@ export class VolumeFlow extends BaseVisualization {
     }
 
     // Fixed side-on camera with subtle vertical bob (no orbiting)
-    const camHeight = 20 + Math.sin(time * 0.1) * 2;
+    const camHeight = 20 + Math.sin(time * 0.1) * 2 + this.getCameraOffsetY();
     this.camera.position.set(0, camHeight, 60);
-    this.camera.lookAt(0, -2, 0);
+    this.camera.lookAt(0, -2 + this.getCameraOffsetY() * 0.3, 0);
   }
 
   getLegend(): LegendItem[] {

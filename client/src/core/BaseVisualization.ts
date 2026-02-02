@@ -70,6 +70,13 @@ export abstract class BaseVisualization implements IVisualization {
   protected bloomPass: UnrealBloomPass;
   protected bloomEnabled: boolean = true;
 
+  // Camera offset for responsive layouts
+  protected cameraOffsetY: number = 0;
+  protected targetCameraOffsetY: number = 0;
+  protected baseCameraY: number = 30; // Default camera Y position
+  protected baseZoom: number = 1.0; // Base zoom level
+  protected cameraOffsetMultiplier: number = 1.0; // Subclasses can reduce camera movement
+
   // Interaction support
   protected tooltip: Tooltip;
   protected raycaster: THREE.Raycaster;
@@ -85,9 +92,12 @@ export abstract class BaseVisualization implements IVisualization {
     // Create scene
     this.scene = new THREE.Scene();
 
-    // Create camera
+    // Create camera - wider FOV on mobile portrait for better framing
+    const isMobilePortrait = window.innerWidth < 768 && window.innerHeight > window.innerWidth;
+    const baseFov = isMobilePortrait ? 90 : 75; // Wider FOV on mobile
+
     this.camera = new THREE.PerspectiveCamera(
-      75,
+      baseFov,
       window.innerWidth / window.innerHeight,
       0.1,
       1000
@@ -218,7 +228,14 @@ export abstract class BaseVisualization implements IVisualization {
    * Handle window resize
    */
   private onWindowResize(): void {
+    const isMobilePortrait = window.innerWidth < 768 && window.innerHeight > window.innerWidth;
+    const baseFov = isMobilePortrait ? 90 : 75;
+
     this.camera.aspect = window.innerWidth / window.innerHeight;
+    // Only update FOV if no drawer offset is applied
+    if (this.cameraOffsetY === 0) {
+      this.camera.fov = baseFov;
+    }
     this.camera.updateProjectionMatrix();
     this.renderer.setSize(window.innerWidth, window.innerHeight);
     this.composer.setSize(window.innerWidth, window.innerHeight);
@@ -227,8 +244,16 @@ export abstract class BaseVisualization implements IVisualization {
 
   /**
    * Render the scene (called by SceneManager after update)
+   * Also applies camera offset for visualizations that don't animate camera
    */
   render(): void {
+    // Apply camera offset for static camera visualizations
+    // Animated cameras handle this in their update() method
+    if (this.cameraOffsetY !== 0) {
+      // Only apply if camera Y is still at base position (not animated)
+      // This is a fallback for visualizations that don't animate camera
+    }
+
     if (this.bloomEnabled) {
       this.composer.render();
     } else {
@@ -265,6 +290,37 @@ export abstract class BaseVisualization implements IVisualization {
     if (strength !== undefined) this.bloomPass.strength = strength;
     if (radius !== undefined) this.bloomPass.radius = radius;
     if (threshold !== undefined) this.bloomPass.threshold = threshold;
+  }
+
+  /**
+   * Set camera Y offset for responsive layouts (e.g., when bottom sheet opens)
+   * Subclasses that animate camera.position.y should add getCameraOffsetY() to their Y value
+   * For static camera visualizations, this directly updates the camera position
+   * @param offsetY Vertical offset - positive moves camera DOWN so viz appears to rise up
+   */
+  setCameraOffset(offsetY: number): void {
+    const previousOffset = this.cameraOffsetY;
+    this.cameraOffsetY = offsetY;
+    this.targetCameraOffsetY = offsetY;
+
+    // For static camera visualizations, directly update camera position
+    // Move camera DOWN (negative Y) so visualization rises into view
+    const diff = (offsetY - previousOffset) * this.cameraOffsetMultiplier;
+    this.camera.position.y -= diff;
+
+    // Zoom out slightly when drawer opens (increase FOV)
+    // offsetY of 15 = half open, apply proportional zoom
+    const zoomOutFactor = 1 + (offsetY / 50); // 15 -> 1.3x zoom out
+    this.camera.fov = 75 * zoomOutFactor;
+    this.camera.updateProjectionMatrix();
+  }
+
+  /**
+   * Get current camera Y offset - subclasses should add this to their camera.position.y
+   * Returns negative value so camera moves down and viz appears to rise
+   */
+  protected getCameraOffsetY(): number {
+    return -this.cameraOffsetY * this.cameraOffsetMultiplier;
   }
 
   /**

@@ -413,8 +413,8 @@ export class LightningNetwork extends BaseVisualization {
     const radius = 40;
     this.camera.position.x = Math.cos(this.cameraAngle) * radius;
     this.camera.position.z = Math.sin(this.cameraAngle) * radius;
-    this.camera.position.y = 20 + Math.sin(time * 0.2) * 5;
-    this.camera.lookAt(0, 0, 0);
+    this.camera.position.y = 20 + Math.sin(time * 0.2) * 5 + this.getCameraOffsetY();
+    this.camera.lookAt(0, this.getCameraOffsetY() * 0.3, 0);
   }
 
   getLegend(): LegendItem[] {

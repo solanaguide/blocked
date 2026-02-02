@@ -220,6 +220,16 @@ export class SceneManager {
   }
 
   /**
+   * Set camera Y offset for responsive layouts
+   * @param offsetY Vertical offset (positive = camera looks higher)
+   */
+  setCameraOffset(offsetY: number): void {
+    if (this.activeScene?.setCameraOffset) {
+      this.activeScene.setCameraOffset(offsetY);
+    }
+  }
+
+  /**
    * Clean up all resources
    */
   dispose(): void {

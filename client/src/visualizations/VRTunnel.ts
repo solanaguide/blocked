@@ -27,6 +27,9 @@ export class VRTunnel extends BaseVisualization {
   constructor() {
     super();
 
+    // Tunnel needs less camera drop when drawer opens (we're inside it)
+    this.cameraOffsetMultiplier = 0.3;
+
     // Camera looks down the tunnel
     this.camera.position.set(0, 0, 10);
     this.camera.lookAt(0, 0, -100);
@@ -251,11 +254,11 @@ export class VRTunnel extends BaseVisualization {
     // Camera shake during whoosh
     if (this.whooshEffect > 0) {
       this.camera.position.x = (Math.random() - 0.5) * this.whooshEffect * 0.5;
-      this.camera.position.y = (Math.random() - 0.5) * this.whooshEffect * 0.5;
+      this.camera.position.y = (Math.random() - 0.5) * this.whooshEffect * 0.5 + this.getCameraOffsetY();
     } else {
       // Smooth camera back to center
       this.camera.position.x *= 0.9;
-      this.camera.position.y *= 0.9;
+      this.camera.position.y = this.camera.position.y * 0.9 + this.getCameraOffsetY() * 0.1;
     }
 
     // Subtle camera roll

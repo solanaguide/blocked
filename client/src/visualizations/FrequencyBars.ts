@@ -368,6 +368,7 @@ export class FrequencyBars extends BaseVisualization {
 
     // Rotate camera slightly for dynamic view
     this.camera.position.x = Math.sin(time * 0.1) * 5;
+    this.camera.position.y = 15 + this.getCameraOffsetY();
   }
 
   getLegend(): LegendItem[] {

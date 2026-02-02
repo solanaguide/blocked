@@ -52,15 +52,25 @@
       font-size: 14px;
       text-transform: uppercase;
       letter-spacing: 2px;
+      pointer-events: auto;
     }
 
     .top-bar .title {
       font-size: 24px;
       font-weight: bold;
+      display: flex;
+      align-items: center;
+      gap: 4px;
+    }
+
+    .top-bar .title-icon {
+      font-size: 20px;
+    }
+
+    .top-bar .title-text {
       background: linear-gradient(90deg, #ff006e, #8b5cf6, #06ffa5);
       -webkit-background-clip: text;
       -webkit-text-fill-color: transparent;
-      text-shadow: 0 0 20px rgba(139, 92, 246, 0.5);
     }
 
     .top-bar .stats {
@@ -100,6 +110,8 @@
       padding: 20px;
       box-shadow: 0 0 30px rgba(139, 92, 246, 0.2);
       overflow-y: auto;
+      pointer-events: auto;
+      -webkit-overflow-scrolling: touch;
     }
 
     .panel-title {
@@ -177,6 +189,8 @@
       border-radius: 10px;
       padding: 20px;
       box-shadow: 0 0 30px rgba(139, 92, 246, 0.2);
+      pointer-events: auto;
+      -webkit-overflow-scrolling: touch;
     }
 
     .leaderboard {
@@ -248,6 +262,7 @@
       box-shadow: 0 0 30px rgba(139, 92, 246, 0.2);
       display: flex;
       gap: 15px;
+      pointer-events: auto;
     }
 
     .chart-container {
@@ -388,6 +403,323 @@
       background: rgba(139, 92, 246, 0.5);
       border-radius: 3px;
     }
+
+    /* Collapsed Panel Tabs */
+    .panel-tab {
+      position: fixed;
+      background: rgba(0, 0, 0, 0.8);
+      border: 1px solid rgba(139, 92, 246, 0.4);
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      pointer-events: auto;
+      transition: background 0.2s ease, box-shadow 0.2s ease;
+      z-index: 15;
+      display: none;
+    }
+
+    .panel-tab:hover {
+      background: rgba(139, 92, 246, 0.3);
+      box-shadow: 0 0 15px rgba(139, 92, 246, 0.5);
+    }
+
+    .panel-tab-left {
+      left: 0;
+      top: 50%;
+      transform: translateY(-50%);
+      width: 40px;
+      height: 120px;
+      border-radius: 0 8px 8px 0;
+      border-left: none;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .panel-tab-right {
+      right: 0;
+      top: 50%;
+      transform: translateY(-50%);
+      width: 40px;
+      height: 120px;
+      border-radius: 8px 0 0 8px;
+      border-right: none;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .panel-tab-bottom {
+      bottom: 0;
+      left: 50%;
+      transform: translateX(-50%);
+      width: 120px;
+      height: 40px;
+      border-radius: 8px 8px 0 0;
+      border-bottom: none;
+      gap: 8px;
+      z-index: 90;
+    }
+
+    .panel-tab-icon {
+      font-size: 16px;
+    }
+
+    .panel-tab-label {
+      font-size: 10px;
+      color: #8b5cf6;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+    }
+
+    .panel-tab-left .panel-tab-label,
+    .panel-tab-right .panel-tab-label {
+      writing-mode: vertical-rl;
+      text-orientation: mixed;
+    }
+
+    /* Panel collapse transitions */
+    .left-panel,
+    .right-panel,
+    .bottom-panel {
+      transition: transform 0.3s ease-out, opacity 0.3s ease-out;
+    }
+
+    .left-panel.collapsed {
+      transform: translateX(-100%);
+      opacity: 0;
+      pointer-events: none;
+    }
+
+    .right-panel.collapsed {
+      transform: translateX(100%);
+      opacity: 0;
+      pointer-events: none;
+    }
+
+    .bottom-panel.collapsed {
+      transform: translate(-50%, 100%);
+      opacity: 0;
+      pointer-events: none;
+    }
+
+    /* Mobile Bottom Sheet */
+    .bottom-sheet {
+      position: fixed;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      height: 90vh;
+      background: rgba(0, 0, 0, 0.95);
+      backdrop-filter: blur(15px);
+      border-top: 1px solid rgba(139, 92, 246, 0.4);
+      border-radius: 20px 20px 0 0;
+      z-index: 100;
+      transform: translateY(100%);
+      transition: transform 0.3s ease-out;
+      pointer-events: auto;
+      overflow: hidden;
+      display: none;
+    }
+
+    .bottom-sheet.visible {
+      transform: translateY(0); /* Full - shows 90vh */
+    }
+
+    .bottom-sheet.peek {
+      transform: translateY(calc(90vh - 150px)); /* Peek - shows ~150px */
+    }
+
+    .bottom-sheet.half {
+      transform: translateY(45vh); /* Half - shows 45vh (50% of screen) */
+    }
+
+    .bottom-sheet-handle {
+      width: 40px;
+      height: 4px;
+      background: rgba(139, 92, 246, 0.5);
+      border-radius: 2px;
+      margin: 12px auto;
+    }
+
+    .bottom-sheet-tabs {
+      display: flex;
+      border-bottom: 1px solid rgba(139, 92, 246, 0.2);
+      padding: 0 20px;
+    }
+
+    .bottom-sheet-tab {
+      padding: 12px 20px;
+      font-size: 12px;
+      color: #666;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      border: none;
+      background: none;
+      cursor: pointer;
+      border-bottom: 2px solid transparent;
+      transition: color 0.2s, border-color 0.2s;
+    }
+
+    .bottom-sheet-tab.active {
+      color: #8b5cf6;
+      border-bottom-color: #8b5cf6;
+    }
+
+    .bottom-sheet-content {
+      padding: 20px;
+      overflow-y: auto;
+      max-height: calc(90vh - 80px);
+      -webkit-overflow-scrolling: touch;
+    }
+
+    .bottom-sheet-panel {
+      display: none;
+    }
+
+    .bottom-sheet-panel.active {
+      display: block;
+    }
+
+    /* Controls help */
+    .controls {
+      pointer-events: auto;
+    }
+
+    /* Responsive Breakpoints */
+
+    /* Tablet: 768px - 1024px */
+    @media (max-width: 1024px) {
+      .left-panel,
+      .right-panel {
+        display: none;
+      }
+
+      .panel-tab-left,
+      .panel-tab-right {
+        display: flex;
+      }
+
+      .left-panel.expanded,
+      .right-panel.expanded {
+        display: block;
+      }
+
+      .bottom-panel {
+        width: calc(100% - 100px);
+        left: 50px;
+        transform: none;
+      }
+
+      .top-bar .stat:nth-child(2),
+      .top-bar .stat:nth-child(6),
+      .top-bar .stat:nth-child(7) {
+        display: none;
+      }
+
+      .controls {
+        display: none;
+      }
+    }
+
+    /* Mobile: < 768px */
+    @media (max-width: 768px) {
+      .top-bar {
+        height: 50px;
+        padding: 0 15px;
+      }
+
+      .top-bar .title {
+        font-size: 16px;
+      }
+
+      .top-bar .title-icon {
+        font-size: 14px;
+      }
+
+      .top-bar .stats {
+        gap: 15px;
+      }
+
+      /* Hide: Revenue(2), Complete(4), SPS(6), Mode(7) - Keep: Volume(1), TPS(3), Slot(5) */
+      .top-bar .stat:nth-child(2),
+      .top-bar .stat:nth-child(4),
+      .top-bar .stat:nth-child(6),
+      .top-bar .stat:nth-child(7) {
+        display: none;
+      }
+
+      .top-bar .stat:nth-child(3) {
+        display: flex;
+      }
+
+      .top-bar .stat-label {
+        font-size: 9px;
+      }
+
+      .top-bar .stat-value {
+        font-size: 12px;
+      }
+
+      .left-panel,
+      .right-panel,
+      .bottom-panel {
+        display: none;
+      }
+
+      .panel-tab-left,
+      .panel-tab-right,
+      .panel-tab-bottom {
+        display: flex;
+      }
+
+      .bottom-sheet {
+        display: block;
+      }
+
+      .controls {
+        display: none;
+      }
+    }
+
+    /* Small Mobile: < 480px */
+    @media (max-width: 480px) {
+      .top-bar .title {
+        font-size: 14px;
+      }
+
+      .top-bar .title-icon {
+        font-size: 12px;
+      }
+
+      .top-bar .stats {
+        gap: 10px;
+      }
+
+      /* Show Volume(1), TPS(3), Slot(5) */
+      .top-bar .stat:nth-child(2),
+      .top-bar .stat:nth-child(4),
+      .top-bar .stat:nth-child(6),
+      .top-bar .stat:nth-child(7) {
+        display: none;
+      }
+
+      .top-bar .stat:nth-child(1),
+      .top-bar .stat:nth-child(3),
+      .top-bar .stat:nth-child(5) {
+        display: flex;
+      }
+
+      .panel-tab-left,
+      .panel-tab-right {
+        height: 100px;
+        width: 35px;
+      }
+
+      .panel-tab-bottom {
+        width: 100px;
+        height: 35px;
+      }
+    }
   </style>
 </head>
 <body>
@@ -396,7 +728,7 @@
   <div id="hud">
     <!-- Top KPI Bar -->
     <div class="top-bar">
-      <div class="title">SOLANA BLOCKS LIVE</div>
+      <div class="title"><span class="title-icon">🧭</span> <span class="title-text">LIVE</span></div>
       <div class="stats">
         <div class="stat">
           <div class="stat-label">Volume</div>
@@ -532,6 +864,49 @@
         </div>
       </div>
 
+      <!-- Network Activity Section -->
+      <div class="panel-section">
+        <div class="panel-title">Network Activity</div>
+        <div class="stat-row">
+          <span class="label">Unique Accounts</span>
+          <span class="value" id="block-accounts">0</span>
+        </div>
+        <div class="stat-row">
+          <span class="label">Unique Programs</span>
+          <span class="value" id="block-programs">0</span>
+        </div>
+        <div class="stat-row">
+          <span class="label">Unique Signers</span>
+          <span class="value" id="block-signers">0</span>
+        </div>
+        <div class="stat-row">
+          <span class="label">Instructions</span>
+          <span class="value" id="block-instructions">0</span>
+        </div>
+        <div class="stat-row">
+          <span class="label">Avg CPI Depth</span>
+          <span class="value" id="block-cpi-depth">0</span>
+        </div>
+      </div>
+
+      <!-- Block Progress -->
+      <div class="panel-section">
+        <div class="panel-title">Block Progress</div>
+        <div class="progress-bar">
+          <div class="progress-fill" id="progress-fill" style="width: 0%"></div>
+        </div>
+      </div>
+
+      <!-- Block Log -->
+      <div class="block-log-container">
+        <div class="panel-title" style="margin-top: 10px; margin-bottom: 10px;">Block Log</div>
+        <div class="block-log-header">Slot      Txns   Rev  Vol</div>
+        <div id="block-log" class="block-log"></div>
+      </div>
+    </div>
+
+    <!-- Right Panel -->
+    <div class="right-panel">
       <!-- Trading Activity Section -->
       <div class="panel-section">
         <div class="panel-title">Trading Activity</div>
@@ -578,51 +953,8 @@
         </div>
       </div>
 
-      <!-- Network Activity Section -->
-      <div class="panel-section">
-        <div class="panel-title">Network Activity</div>
-        <div class="stat-row">
-          <span class="label">Unique Accounts</span>
-          <span class="value" id="block-accounts">0</span>
-        </div>
-        <div class="stat-row">
-          <span class="label">Unique Programs</span>
-          <span class="value" id="block-programs">0</span>
-        </div>
-        <div class="stat-row">
-          <span class="label">Unique Signers</span>
-          <span class="value" id="block-signers">0</span>
-        </div>
-        <div class="stat-row">
-          <span class="label">Instructions</span>
-          <span class="value" id="block-instructions">0</span>
-        </div>
-        <div class="stat-row">
-          <span class="label">Avg CPI Depth</span>
-          <span class="value" id="block-cpi-depth">0</span>
-        </div>
-      </div>
-
-      <!-- Block Progress -->
-      <div class="panel-section">
-        <div class="panel-title">Block Progress</div>
-        <div class="progress-bar">
-          <div class="progress-fill" id="progress-fill" style="width: 0%"></div>
-        </div>
-      </div>
-
-      <!-- Block Log -->
-      <div class="block-log-container">
-        <div class="panel-title" style="margin-top: 10px; margin-bottom: 10px;">Block Log</div>
-        <div class="block-log-header">Slot      Txns   Rev  Vol</div>
-        <div id="block-log" class="block-log"></div>
-      </div>
-    </div>
-
-    <!-- Right Panel -->
-    <div class="right-panel">
       <div class="leaderboard">
-        <div class="panel-title" id="programs-title">Top Programs (last block)</div>
+        <div class="panel-title" id="programs-title">Top DEX (last block)</div>
         <div id="programs-leaderboard"></div>
       </div>
       <div class="leaderboard">
@@ -652,6 +984,47 @@
       <div><kbd>F</kbd> Free Mode <kbd>P</kbd> Program <kbd>T</kbd> Token <kbd>V</kbd> Volume</div>
       <div><kbd>+/-</kbd> Particle Size <kbd>L</kbd> Leaderboard <kbd>C</kbd> Chart Mode</div>
       <div><kbd>[/]</kbd> Switch Scene <kbd>A</kbd> Auto-cycle</div>
+    </div>
+
+    <!-- Collapsed Panel Tabs -->
+    <div class="panel-tab panel-tab-left" id="left-panel-tab" data-panel="left">
+      <span class="panel-tab-icon">📊</span>
+      <span class="panel-tab-label">Stats</span>
+    </div>
+
+    <div class="panel-tab panel-tab-right" id="right-panel-tab" data-panel="right">
+      <span class="panel-tab-icon">💹</span>
+      <span class="panel-tab-label">Trading</span>
+    </div>
+
+    <div class="panel-tab panel-tab-bottom" id="bottom-panel-tab" data-panel="bottom">
+      <span class="panel-tab-icon">📈</span>
+      <span class="panel-tab-label">Charts</span>
+    </div>
+
+    <!-- Mobile Bottom Sheet -->
+    <div class="bottom-sheet" id="bottom-sheet">
+      <div class="bottom-sheet-handle"></div>
+      <div class="bottom-sheet-tabs">
+        <button class="bottom-sheet-tab active" data-tab="stats">Stats</button>
+        <button class="bottom-sheet-tab" data-tab="trading">Trading</button>
+        <button class="bottom-sheet-tab" data-tab="charts">Charts</button>
+        <button class="bottom-sheet-tab" data-tab="legend">Legend</button>
+      </div>
+      <div class="bottom-sheet-content">
+        <div class="bottom-sheet-panel active" id="sheet-stats">
+          <!-- Stats content will be populated by PanelManager -->
+        </div>
+        <div class="bottom-sheet-panel" id="sheet-trading">
+          <!-- Trading content will be populated by PanelManager -->
+        </div>
+        <div class="bottom-sheet-panel" id="sheet-charts">
+          <!-- Charts content will be populated by PanelManager -->
+        </div>
+        <div class="bottom-sheet-panel" id="sheet-legend">
+          <!-- Legend content will be populated by Legend.ts -->
+        </div>
+      </div>
     </div>
   </div>
 
