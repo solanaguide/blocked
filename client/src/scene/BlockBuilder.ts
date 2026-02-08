@@ -23,7 +23,6 @@ export class BlockBuilder {
     }
 
     // Create block mesh - FIXED SIZE since we don't know volume yet (container approach)
-    // Larger size for better visibility
     const blockSize = 30; // Fixed size container
     const geometry = new THREE.BoxGeometry(blockSize, blockSize, blockSize);
 
@@ -41,9 +40,10 @@ export class BlockBuilder {
 
     const mesh = new THREE.Mesh(geometry, material);
 
-    // NEW APPROACH: Block spawns at CENTER and stays there while forming
-    mesh.position.set(0, 0, 0);
-    console.log(`📦 Block ${blockData.slot} spawned at CENTER (0, 0, 0) - stationary while forming`);
+    // CONVEYOR BELT: Block spawns off-screen left, slides to center quickly
+    // Then pauses at center to fill with particles (~300ms), then sweeps right
+    mesh.position.set(-30, 0, 0);
+    console.log(`📦 Block ${blockData.slot} spawned at x=-30 (conveyor entry)`);
 
     // Add bright edges for visibility
     const edges = new THREE.EdgesGeometry(geometry);
@@ -65,7 +65,7 @@ export class BlockBuilder {
       blockData,
       phase: 'forming',
       lifetime: 0,
-      rotation: new THREE.Vector3(0, 0, 0),  // No rotation
+      rotation: new THREE.Vector3(0, 0, 0),
       lockedParticles: new Set(),
       gridSize: blockSize,
       gridPositions: new Set(),
@@ -75,25 +75,22 @@ export class BlockBuilder {
   }
 
   private sweepBlockAway(blockMesh: BlockMesh) {
-    // Block is about to sweep away
-    // Signal to instantly lock ALL unlocked particles for this slot
     blockMesh.phase = 'sweeping';
+    // Ensure block is snapped to center before sweeping
+    blockMesh.mesh.position.x = 0;
 
-    console.log(`🌊 Block ${blockMesh.blockData.slot} sweeping with ${blockMesh.lockedParticles.size} locked particles (will force-lock remaining)`);
+    console.log(`🌊 Block ${blockMesh.blockData.slot} sweeping with ${blockMesh.lockedParticles.size} locked particles`);
 
-    // Flash the block edges brighter when it completes
     this.flashBlockCompletion(blockMesh);
   }
 
   private flashBlockCompletion(blockMesh: BlockMesh) {
-    // Brighten the wireframe edges momentarily
     const wireframeMat = blockMesh.wireframe.material as THREE.LineBasicMaterial;
     const originalOpacity = wireframeMat.opacity;
 
     wireframeMat.opacity = 1.0;
-    wireframeMat.color.setHex(0x00ffff); // Bright cyan flash
+    wireframeMat.color.setHex(0x00ffff);
 
-    // Fade back to normal over 200ms
     const startTime = Date.now();
     const animate = () => {
       const elapsed = Date.now() - startTime;
@@ -109,9 +106,9 @@ export class BlockBuilder {
     animate();
   }
 
-  // Lock a particle into the forming block's grid - only if particle slot matches block slot
+  // Lock a particle into the forming block's grid
+  // All grid positions are stored in BLOCK-LOCAL space
   lockParticle(particleId: string, particleSlot: number, particlePosition: THREE.Vector3): { locked: boolean; gridPosition?: THREE.Vector3 } {
-    // Find the forming block
     let formingBlock: BlockMesh | undefined;
     for (const block of this.activeBlocks.values()) {
       if (block.phase === 'forming') {
@@ -124,32 +121,34 @@ export class BlockBuilder {
       return { locked: false };
     }
 
-    // Particles can ONLY lock to blocks with matching slot numbers
     if (particleSlot !== formingBlock.blockData.slot) {
       return { locked: false };
     }
 
-    // Block is at center (0, 0, 0), so distance check is simple
+    // Calculate block-relative position
     const blockPos = formingBlock.mesh.position;
-    const distance = particlePosition.distanceTo(blockPos);
-    const lockRadius = formingBlock.gridSize * 0.8; // Larger radius for container filling
+    const halfSize = formingBlock.gridSize / 2; // 15
+    const relX = particlePosition.x - blockPos.x;
+    const relY = particlePosition.y - blockPos.y;
+    const relZ = particlePosition.z - blockPos.z;
 
-    if (distance > lockRadius) {
+    // AABB bounds check in block-local space
+    if (Math.abs(relX) > halfSize || Math.abs(relY) > halfSize || Math.abs(relZ) > halfSize) {
       return { locked: false };
     }
 
-    // Only log occasionally to avoid spam
-    if (Math.random() < 0.02) {
-      console.log(`🔒 Locking particle ${particleId.slice(0,6)} (slot ${particleSlot}) to block at distance ${distance.toFixed(1)}`);
-    }
+    // Grid snap in BLOCK-LOCAL space (not world space)
+    // Separate horizontal/vertical cell sizes for more vertical breathing room
+    const cellXZ = 3.0;
+    const cellY = 5.0;
+    const gridX = Math.round(relX / cellXZ) * cellXZ;
+    let gridY = Math.round(relY / cellY) * cellY;
+    const gridZ = Math.round(relZ / cellXZ) * cellXZ;
 
-    // Calculate grid position (snap to grid) - MUST MATCH ParticleSystem stacking cellSize!
-    const cellSize = 3.0; // Tighter stacking, matches ParticleSystem.ts
-    const gridX = Math.round(particlePosition.x / cellSize) * cellSize;
-    const gridY = Math.round(particlePosition.y / cellSize) * cellSize;
-    const gridZ = Math.round(particlePosition.z / cellSize) * cellSize;
+    // Clamp gridY within block bounds (grid-aligned)
+    const gridYMax = Math.floor((halfSize - 1) / cellY) * cellY;
+    gridY = Math.max(-gridYMax, Math.min(gridYMax, gridY));
 
-    // Check if this grid position is already occupied
     const gridKey = `${gridX},${gridY},${gridZ}`;
     if (formingBlock.gridPositions.has(gridKey)) {
       // Try nearby positions
@@ -157,9 +156,9 @@ export class BlockBuilder {
         for (let dy = -1; dy <= 1; dy++) {
           for (let dz = -1; dz <= 1; dz++) {
             if (dx === 0 && dy === 0 && dz === 0) continue;
-            const nearX = gridX + dx * cellSize;
-            const nearY = gridY + dy * cellSize;
-            const nearZ = gridZ + dz * cellSize;
+            const nearX = gridX + dx * cellXZ;
+            const nearY = gridY + dy * cellY;
+            const nearZ = gridZ + dz * cellXZ;
             const nearKey = `${nearX},${nearY},${nearZ}`;
 
             if (!formingBlock.gridPositions.has(nearKey)) {
@@ -173,10 +172,9 @@ export class BlockBuilder {
           }
         }
       }
-      return { locked: false }; // No space found
+      return { locked: false };
     }
 
-    // Lock particle to this grid position
     formingBlock.gridPositions.add(gridKey);
     formingBlock.lockedParticles.add(particleId);
 
@@ -186,31 +184,38 @@ export class BlockBuilder {
     };
   }
 
-  // Get the block position for a given slot (so locked particles can move with their block)
   getBlockPosition(slot: number): THREE.Vector3 | null {
     const block = this.activeBlocks.get(slot);
     return block ? block.mesh.position.clone() : null;
   }
 
-  // Check if a particle is locked
+  // Get the current forming block's position (for particle spawn offset)
+  getFormingBlockPosition(): THREE.Vector3 {
+    for (const block of this.activeBlocks.values()) {
+      if (block.phase === 'forming') {
+        return block.mesh.position.clone();
+      }
+    }
+    return new THREE.Vector3(0, 0, 0);
+  }
+
   isParticleLocked(particleId: string): boolean {
     const currentBlock = Array.from(this.activeBlocks.values())[0];
     return currentBlock ? currentBlock.lockedParticles.has(particleId) : false;
   }
 
-  // Check if we have a forming block for a given slot
   hasFormingBlockForSlot(slot: number): boolean {
     const block = this.activeBlocks.get(slot);
     return block !== undefined && block.phase === 'forming';
   }
 
-  // Check if a block is sweeping
   isBlockSweeping(slot: number): boolean {
     const block = this.activeBlocks.get(slot);
     return block !== undefined && block.phase === 'sweeping';
   }
 
-  // Force-lock a particle to a sweeping block (no distance check)
+  // Force-lock a particle to a sweeping block
+  // Clamps position within block bounds
   forceLockParticle(particleId: string, particleSlot: number, particlePosition: THREE.Vector3): { locked: boolean; gridPosition?: THREE.Vector3 } {
     const block = this.activeBlocks.get(particleSlot);
     if (!block) {
@@ -218,8 +223,11 @@ export class BlockBuilder {
     }
 
     const blockPos = block.mesh.position;
-    // Calculate relative position to block
+    const halfSize = block.gridSize / 2; // 15
     const relativePos = particlePosition.clone().sub(blockPos);
+    relativePos.x = Math.max(-halfSize, Math.min(halfSize, relativePos.x));
+    relativePos.y = Math.max(-halfSize, Math.min(halfSize, relativePos.y));
+    relativePos.z = Math.max(-halfSize, Math.min(halfSize, relativePos.z));
 
     block.lockedParticles.add(particleId);
 
@@ -229,31 +237,24 @@ export class BlockBuilder {
     };
   }
 
-  // Get height of stacked particles at a given X/Z position (for collision)
-  getStackHeightAt(slot: number, x: number, z: number, cellSize: number): number {
+  // Get stack height at a given BLOCK-LOCAL X/Z position
+  getStackHeightAt(slot: number, relX: number, relZ: number, cellXZ: number, cellY: number): number {
     const block = this.activeBlocks.get(slot);
-    if (!block) return -15; // Bottom of empty block
+    if (!block) return -15;
 
-    // Find highest particle in this X/Z grid cell
-    let maxY = -15; // Start at bottom of block
-    const gridX = Math.round(x / cellSize) * cellSize;
-    const gridZ = Math.round(z / cellSize) * cellSize;
+    let maxY = -15;
+    const gridX = Math.round(relX / cellXZ) * cellXZ;
+    const gridZ = Math.round(relZ / cellXZ) * cellXZ;
 
-    // Check this cell and adjacent cells for stack height
-    for (let dx = -1; dx <= 1; dx++) {
-      for (let dz = -1; dz <= 1; dz++) {
-        const checkX = gridX + dx * cellSize;
-        const checkZ = gridZ + dz * cellSize;
-
-        // Search through occupied grid positions
-        // Block is 30 units tall (Y: -15 to +15), with cellSize=3.0 that's -5 to +5
-        for (let dy = -5; dy <= 5; dy++) { // Full vertical range
-          const checkY = dy * cellSize;
-          const key = `${checkX},${checkY},${checkZ}`;
-          if (block.gridPositions.has(key)) {
-            maxY = Math.max(maxY, checkY);
-          }
-        }
+    // Only check this exact column (Tetris-style per-column stacking)
+    const halfSize = block.gridSize / 2;
+    const gridYMax = Math.floor((halfSize - 1) / cellY) * cellY;
+    const steps = Math.ceil(gridYMax / cellY);
+    for (let dy = -steps; dy <= steps; dy++) {
+      const checkY = dy * cellY;
+      const key = `${gridX},${checkY},${gridZ}`;
+      if (block.gridPositions.has(key)) {
+        maxY = Math.max(maxY, checkY);
       }
     }
 
@@ -261,30 +262,28 @@ export class BlockBuilder {
   }
 
   update(deltaTime: number) {
-    // Update blocks
     for (const [slot, block] of this.activeBlocks) {
       block.lifetime += deltaTime;
 
       if (block.phase === 'forming') {
-        // NEW APPROACH: Forming blocks are STATIONARY at center (0, 0, 0)
-        // They don't move until they transition to 'sweeping'
-        // No movement, no rotation - just stable block accepting particles
+        // CONVEYOR BELT: Slide quickly to center, then pause to fill
+        if (block.mesh.position.x < -0.5) {
+          block.mesh.position.x += deltaTime * 1.0; // Fast arrival (~30ms from x=-30)
+          if (block.mesh.position.x > 0) block.mesh.position.x = 0;
+        } else {
+          block.mesh.position.x = 0; // Stationary at center while filling
+        }
       }
 
       if (block.phase === 'sweeping') {
-        // Sweep block off to the right with its locked particles
         block.mesh.position.x += deltaTime * 0.3;
 
-        // Fade both the solid material and wireframe
         const solidOpacity = (block.mesh.material as THREE.MeshStandardMaterial).opacity;
         (block.mesh.material as THREE.MeshStandardMaterial).opacity = solidOpacity * 0.98;
 
         const wireframeMat = block.wireframe.material as THREE.LineBasicMaterial;
         wireframeMat.opacity *= 0.98;
 
-        // No rotation - keep it stable
-
-        // Remove block after it's off screen
         if (block.mesh.position.x > 120) {
           console.log(`🗑️ Removing block ${slot} at position ${block.mesh.position.x}`);
           this.scene.remove(block.mesh);
@@ -294,16 +293,12 @@ export class BlockBuilder {
           block.wireframe.geometry.dispose();
 
           this.activeBlocks.delete(slot);
-
-          // Signal to remove ALL particles for this slot
           this.slotsToCleanup.add(slot);
         }
       }
     }
-
   }
 
-  // Get slots that need particle cleanup (block exited screen)
   getSlotsToCleanup(): Set<number> {
     const slots = this.slotsToCleanup;
     this.slotsToCleanup = new Set();
@@ -318,8 +313,7 @@ interface BlockMesh {
   phase: 'forming' | 'sweeping';
   lifetime: number;
   rotation: THREE.Vector3;
-  lockedParticles: Set<string>;  // IDs of particles locked into this block
-  gridSize: number;  // Size of the block for grid calculations
-  gridPositions: Set<string>;  // Occupied grid positions (x,y,z keys)
+  lockedParticles: Set<string>;
+  gridSize: number;
+  gridPositions: Set<string>;  // Occupied grid positions in BLOCK-LOCAL space
 }
-

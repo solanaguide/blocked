@@ -77,8 +77,9 @@ export class DataProcessor {
       this.blockHistory.pop();
     }
 
-    // Fire block complete callback (triggers visualization sweep)
-    if (this.onBlockCompleteCallback && oldSlot > 0) {
+    // Fire block complete callback (triggers visualization sweep + new block creation)
+    // Always fire, even for first block (oldSlot=0) so a forming block is ready for particles
+    if (this.onBlockCompleteCallback) {
       const blockData: BlockData = {
         slot: block.slot,
         trades: block.swapCount || 0,

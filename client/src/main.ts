@@ -135,8 +135,13 @@ function handleWSMessage(message: WSMessage) {
   if (message.type === 'block') {
     const block = message as BlockMessage;
 
+    // Process block data FIRST - creates the new forming block so trades
+    // and tx-type particles all spawn into the same block
+    dataProcessor.processBlock(block);
+    hud.updateBlockData(block);
+    hud.updateCurrentSlot(block.slot);
 
-    // Process bundled trades
+    // Process bundled trades AFTER block (forming block now exists for this slot)
     if (block.trades && block.trades.length > 0) {
       for (const trade of block.trades) {
         dataProcessor.processTrade(trade);
@@ -152,11 +157,6 @@ function handleWSMessage(message: WSMessage) {
         }
       }
     }
-
-    // Process block data
-    dataProcessor.processBlock(block);
-    hud.updateBlockData(block);
-    hud.updateCurrentSlot(block.slot);
     currentSlot = block.slot;
 
     // Update top programs and tokens leaderboards

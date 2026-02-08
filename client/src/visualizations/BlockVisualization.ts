@@ -18,7 +18,6 @@ export class BlockVisualization extends BaseVisualization {
   private blockBuilder: BlockBuilder;
   private lastTime: number = 0;
   private blockStartTime: number = Date.now();
-  private firstTradeHandled = false;
 
   // Block data state
   private showVoteParticles: boolean = true;
@@ -42,20 +41,7 @@ export class BlockVisualization extends BaseVisualization {
   }
 
   onTrade(trade: TradeMessage, slot: number): void {
-    // On first trade, create initial block
-    if (!this.firstTradeHandled) {
-      this.firstTradeHandled = true;
-      const blockData: BlockData = {
-        slot: slot,
-        trades: 0,
-        volume: 0,
-        timestamp: Date.now(),
-        particles: [],
-      };
-      this.blockBuilder.startBlock(blockData);
-    }
-
-    // Add trade to particle system
+    // Forming block is already created by onBlockComplete (processBlock runs before trades)
     this.particleSystem.addTrade(trade, slot);
   }
 
@@ -165,34 +151,33 @@ export class BlockVisualization extends BaseVisualization {
 
     // Calculate how many particles to spawn
     // We scale down to keep performance reasonable
-    // Original: ~1500 txns per block, we spawn proportionally
     const scaleFactor = 0.1; // Show 10% of actual tx counts
 
     // Vote particles (golden) - network consensus heartbeat
     if (this.showVoteParticles) {
-      const voteCount = Math.ceil(block.votes * scaleFactor * 0.5); // Extra reduction for votes
+      const voteCount = Math.ceil(block.votes * scaleFactor * 0.5);
       if (voteCount > 0) {
-        this.particleSystem.addTxTypeParticles(voteCount, 'vote', block.slot, 0.3);
+        this.particleSystem.addTxTypeParticles(voteCount, 'vote', block.slot, 0.8);
       }
     }
 
     // Completed transaction particles (cyan)
     const completedCount = Math.ceil(block.completed * scaleFactor);
     if (completedCount > 0) {
-      this.particleSystem.addTxTypeParticles(completedCount, 'completed', block.slot, 0.5);
+      this.particleSystem.addTxTypeParticles(completedCount, 'completed', block.slot, 1.0);
     }
 
     // Reverted transaction particles (amber)
     const revertedCount = Math.ceil(block.reverted * scaleFactor);
     if (revertedCount > 0) {
-      this.particleSystem.addTxTypeParticles(revertedCount, 'reverted', block.slot, 0.5);
+      this.particleSystem.addTxTypeParticles(revertedCount, 'reverted', block.slot, 1.0);
     }
 
-    // Jito MEV particles (orange) - if there are jito transactions
+    // Jito MEV particles (orange)
     if (block.jitoTxns > 0) {
       const jitoCount = Math.ceil(block.jitoTxns * scaleFactor);
       if (jitoCount > 0) {
-        this.particleSystem.addTxTypeParticles(jitoCount, 'jito', block.slot, 0.7);
+        this.particleSystem.addTxTypeParticles(jitoCount, 'jito', block.slot, 1.2);
       }
     }
 

@@ -114,16 +114,13 @@ export class ParticleSystem {
   }
 
   addTrade(trade: TradeMessage, slot: number) {
-    // CONTAINER APPROACH: Spawn particles ABOVE block, they "rain down" and settle inside
-    // Block is at (0, 0, 0) with size 30 units (fixed size)
-    // Spawn in a cone/funnel above it
+    // Spawn particles high above center so the fall is visible (~150-300ms to land)
+    const blockSize = 30;
+    const blockHalfSize = blockSize / 2; // 15
+    const spawnHeight = blockHalfSize + 20 + Math.random() * 20; // 35-55 above center
 
-    const blockSize = 30; // Block size (must match BlockBuilder)
-    const spawnHeight = 25 + Math.random() * 10; // 25-35 units above center
-
-    // Random position within block's X/Z footprint - FULL spread to fill entire volume
-    const spreadX = (Math.random() - 0.5) * blockSize * 1.0; // Full width
-    const spreadZ = (Math.random() - 0.5) * blockSize * 1.0; // Full depth
+    const spreadX = (Math.random() - 0.5) * blockSize * 0.9;
+    const spreadZ = (Math.random() - 0.5) * blockSize * 0.9;
 
     const position = new THREE.Vector3(
       spreadX,
@@ -131,12 +128,12 @@ export class ParticleSystem {
       spreadZ
     );
 
-    // Velocity: primarily downward (gravity-like), minimal drift to preserve spread
+    // Velocity: visible downward fall — takes ~150-250ms to reach block interior
     const speed = this.calculateSpeed(trade.vu);
     const velocity = new THREE.Vector3(
-      -spreadX * 0.01, // Very slight drift toward center X - keep spread!
-      -speed,          // Downward (rain down)
-      -spreadZ * 0.01  // Very slight drift toward center Z - keep spread!
+      -spreadX * 0.003,
+      -speed,
+      -spreadZ * 0.003
     );
 
     // Calculate size
@@ -172,35 +169,37 @@ export class ParticleSystem {
    * @param slot Slot number
    * @param sizeScale Optional size multiplier (default 0.5 for smaller tx particles)
    */
-  addTxTypeParticles(count: number, txType: TxType, slot: number, sizeScale: number = 0.5) {
+  addTxTypeParticles(count: number, txType: TxType, slot: number, sizeScale: number = 1.0) {
     const blockSize = 30;
-    const spawnHeight = 25 + Math.random() * 10;
+    const blockHalfSize = blockSize / 2; // 15
 
     // Get color for this tx type
     const color = (txTypeColors as Record<string, number>)[txType] || 0xffffff;
 
-    // Spawn particles in a burst
+    // Spawn particles high above center with staggered heights for a rain effect
     for (let i = 0; i < count; i++) {
-      const spreadX = (Math.random() - 0.5) * blockSize * 1.0;
-      const spreadZ = (Math.random() - 0.5) * blockSize * 1.0;
+      const spreadX = (Math.random() - 0.5) * blockSize * 0.9;
+      const spreadZ = (Math.random() - 0.5) * blockSize * 0.9;
 
+      const spawnHeight = blockHalfSize + 15 + Math.random() * 35; // 30-65 (staggered rain)
       const position = new THREE.Vector3(
         spreadX,
-        spawnHeight + Math.random() * 5, // Slight height variance
+        spawnHeight,
         spreadZ
       );
 
-      // Velocity: primarily downward
-      const speed = 3.0 + Math.random() * 2;
+      // Velocity: visible fall — varied speeds create staggered landing times
+      const speed = 2.0 + Math.random() * 2.0;
       const velocity = new THREE.Vector3(
-        -spreadX * 0.01,
+        -spreadX * 0.003,
         -speed,
-        -spreadZ * 0.01
+        -spreadZ * 0.003
       );
 
-      // Size based on tx type (votes smaller, others medium)
-      const baseSize = txType === 'vote' ? 0.4 : 0.6;
-      const size = baseSize * sizeScale * this.sizeMultiplier;
+      // Size based on tx type - visible enough to fill the block
+      // Votes are slightly smaller, others are medium-large
+      const baseSize = txType === 'vote' ? 1.0 : 1.5;
+      const size = Math.max(0.8, baseSize * sizeScale * this.sizeMultiplier);
 
       // Create particle with unique ID
       const particleId = `${txType}-${slot}-${i}-${Math.random().toString(36).slice(2, 8)}`;
@@ -283,10 +282,9 @@ export class ParticleSystem {
   }
 
   private calculateSpeed(volumeUsd: number): number {
-    // CONTAINER APPROACH: Fall speed (downward velocity)
-    // Bigger trades fall faster (like heavier objects)
-    // Doubled for faster particle descent
-    return 4.0 + Math.log10(Math.max(1, volumeUsd)) * 0.6;
+    // Visible fall speed — particles take ~150-300ms to reach block interior
+    // from spawn height of 35-55 above center
+    return 2.5 + Math.log10(Math.max(1, volumeUsd)) * 0.3;
   }
 
   private calculateSize(volumeUsd: number): number {
@@ -375,29 +373,36 @@ export class ParticleSystem {
             }
           }
         } else {
-          // CONTAINER APPROACH: Particles rain down, maintaining their downward velocity
-          // They DON'T recalculate toward center - they fall straight down
-
           // Update position - particles fall with their initial velocity
           particle.position.add(
-            particle.velocity.clone().multiplyScalar(deltaTime * 0.1) // Doubled fall speed
+            particle.velocity.clone().multiplyScalar(deltaTime * 0.1)
           );
 
-          // PHYSICS-STYLE STACKING: Check if particle should land on other particles
+          // PHYSICS-STYLE STACKING using BLOCK-RELATIVE coordinates
           const blockHalfSize = 15;
-          const isInsideXZ = Math.abs(particle.position.x) < blockHalfSize &&
-                             Math.abs(particle.position.z) < blockHalfSize;
+          const blockPos = blockBuilder.getBlockPosition(particle.slot);
+          const bx = blockPos ? blockPos.x : 0;
+          const by = blockPos ? blockPos.y : 0;
+          const bz = blockPos ? blockPos.z : 0;
+
+          // Check if particle is within block's XZ footprint (relative to block)
+          const relX = particle.position.x - bx;
+          const relZ = particle.position.z - bz;
+          const isInsideXZ = Math.abs(relX) < blockHalfSize &&
+                             Math.abs(relZ) < blockHalfSize;
 
           if (isInsideXZ) {
-            // Get height of stack at this X/Z position
-            const cellSize = 3.0; // Reduced for tighter stacking that reaches block top
-            const stackHeight = blockBuilder.getStackHeightAt(particle.slot, particle.position.x, particle.position.z, cellSize);
-            const landingHeight = stackHeight + cellSize; // Land on top of stack
+            const cellXZ = 3.0;
+            const cellY = 5.0;
+            // Stack height check uses block-local coordinates
+            const stackHeight = blockBuilder.getStackHeightAt(particle.slot, relX, relZ, cellXZ, cellY);
+            const gridYMax = Math.floor((blockHalfSize - 1) / cellY) * cellY;
+            const landingHeight = Math.min(stackHeight + cellY, gridYMax);
 
-            // Check if particle has reached landing height
-            if (particle.position.y <= landingHeight) {
-              // Particle should lock here - either on floor or on top of other particles
-              particle.position.y = landingHeight; // Snap to landing height
+            // Landing check relative to block Y
+            const relY = particle.position.y - by;
+            if (relY <= landingHeight) {
+              particle.position.y = by + landingHeight;
 
               const lockResult = blockBuilder.lockParticle(particle.id, particle.slot, particle.position);
               if (lockResult.locked && lockResult.gridPosition) {
@@ -405,7 +410,6 @@ export class ParticleSystem {
                 particle.lockedPosition.copy(lockResult.gridPosition);
                 particle.velocity.set(0, 0, 0);
               } else {
-                // Failed to lock - log occasionally for debugging
                 if (Math.random() < 0.01) {
                   console.warn(`⚠️ Particle ${particle.id.slice(0,6)} (slot ${particle.slot}) failed to lock at landing height`);
                 }
@@ -413,9 +417,9 @@ export class ParticleSystem {
             }
           }
 
-          // Stop particles from falling through the bottom
-          if (particle.position.y < -blockHalfSize) {
-            particle.position.y = -blockHalfSize;
+          // Stop particles from falling through the block bottom
+          if (particle.position.y < by - blockHalfSize) {
+            particle.position.y = by - blockHalfSize;
             particle.velocity.y = 0;
           }
         }
