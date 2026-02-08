@@ -112,6 +112,7 @@ let currentShape: ParticleShape = 'cube';
 let tradesThisSecond = 0;
 let volumeThisSecond = 0;
 let lastTpsUpdate = Date.now();
+let latestTokenNames: Record<string, string> = {};
 
 // Handle worker messages
 worker.onmessage = (event) => {
@@ -159,11 +160,16 @@ function handleWSMessage(message: WSMessage) {
     }
     currentSlot = block.slot;
 
+    // Store latest token names from server (persists across blocks)
+    if (block.tokenNames) {
+      latestTokenNames = { ...latestTokenNames, ...block.tokenNames };
+    }
+
     // Update top programs and tokens leaderboards
     const programVolumes = dataProcessor.getProgramVolumes();
     const tokenVolumes = dataProcessor.getTokenVolumes();
     hud.updateProgramStats(Object.fromEntries(programVolumes));
-    hud.updateTokenStats(Object.fromEntries(tokenVolumes));
+    hud.updateTokenStats(Object.fromEntries(tokenVolumes), undefined, latestTokenNames);
 
     // Add block log entry
     hud.addBlockLogEntry(block.slot, block.trades?.length || 0, block.swapVolumeUsd);

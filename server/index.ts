@@ -4,6 +4,8 @@ import { WebSocketServer, WebSocket } from 'ws';
 import { createServer } from 'http';
 import { RedisSubscriber } from './redis-client.js';
 import { config } from './config.js';
+import { TokenResolver } from './token-resolver.js';
+import { programNames } from '../shared/program-names.js';
 import type { BlockMessage, TradeMessage } from '../shared/types.js';
 
 const app = express();
@@ -34,6 +36,12 @@ const networkCache: NetworkStateCache = {
   lastBlockSlot: 0,
   lastBlockTime: 0,
 };
+
+// Token name resolver (Jupiter API)
+const tokenResolver = new TokenResolver();
+
+// Reverse map: shortMint → fullMint (populated during processRawTrade)
+const mintReverseMap: Map<string, string> = new Map();
 
 // Decay factor for rolling averages (applied per block)
 const CACHE_DECAY = 0.9;
@@ -115,18 +123,9 @@ function broadcast(message: any) {
 let lastBlockTime = Date.now();
 const tradesPerSlot: Map<number, TradeMessage[]> = new Map();
 
-// Shorten program IDs for common ones
+// Shorten program IDs using the full program names map
 function shortenProgramId(id: string): string {
-  const map: Record<string, string> = {
-    'JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4': 'JUP',
-    'CAMMCzo5YL8w4VFF8KVHrK22GGUsp5VTaW7grrKgrWqK': 'RAYDIUM_CLMM',
-    '6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P': 'RAYDIUM_CP',
-    'whirLbMiicVdio4qvUfM5KAg6Ct8VwpYzGff3uctyCc': 'ORCA',
-    'PhoeNiXZ8ByJGLkxNfZRnkUfjvmuYqLR89jjFHGqdXY': 'PHOENIX',
-    'cpamdpZCGKUy5JxQXB4dcpGPiikHawvSWAd6mEn1sGG': 'RAYDIUM_CPMM',
-    'LanMV9sAd7wArD4vJFi2qDdfnVhFxYSUg6eADduJ3uj': 'LIFINITY',
-  };
-  return map[id] || id.slice(0, 8);
+  return programNames[id] || id.slice(0, 8);
 }
 
 // Shorten token mints
@@ -144,12 +143,19 @@ function processRawTrade(raw: any): TradeMessage {
   const volumeUsd = (raw.token_a.amount / Math.pow(10, raw.token_a.decimals)) *
                     (raw.token_a.price_usd / 1e12);
 
+  const shortA = shortenMint(raw.token_a.id);
+  const shortB = shortenMint(raw.token_b.id);
+
+  // Populate reverse map for token name resolution
+  mintReverseMap.set(shortA, raw.token_a.id);
+  mintReverseMap.set(shortB, raw.token_b.id);
+
   const trade: TradeMessage = {
     s: raw.slot,
     t: new Date(raw['@timestamp']).getTime(),
     sig: raw.signature.slice(0, 8),
-    ta: shortenMint(raw.token_a.id),
-    tb: shortenMint(raw.token_b.id),
+    ta: shortA,
+    tb: shortB,
     aa: raw.token_a.amount.toString(),
     ab: raw.token_b.amount.toString(),
     vu: volumeUsd,
@@ -320,6 +326,24 @@ redisSubscriber.onBlock((rawBlock) => {
       tradesPerSlot.delete(slots[i]);
     }
   }
+
+  // Resolve token names via Jupiter API
+  // Collect top 50 tokens by volume and resolve any missing names
+  const topTokenMints = Array.from(networkCache.topTokens.entries())
+    .sort((a, b) => b[1].volume - a[1].volume)
+    .slice(0, 50)
+    .map(([shortMint]) => shortMint)
+    .map(shortMint => mintReverseMap.get(shortMint))
+    .filter((fullMint): fullMint is string => !!fullMint);
+
+  const missingMints = tokenResolver.getMissing(topTokenMints);
+  if (missingMints.length > 0) {
+    // Fire-and-forget: don't block broadcast on API call
+    tokenResolver.resolve(missingMints).catch(() => {});
+  }
+
+  // Attach resolved token names to the block message
+  blockMessage.tokenNames = tokenResolver.buildTokenNames(mintReverseMap);
 
   lastBlockTime = now;
   broadcast(blockMessage);

@@ -149,7 +149,7 @@ export class HUD {
     }
   }
 
-  updateTokenStats(tokens: Record<string, number>, title?: string) {
+  updateTokenStats(tokens: Record<string, number>, title?: string, tokenNames?: Record<string, string>) {
     this.tokenStats.clear();
     let total = 0;
 
@@ -179,6 +179,7 @@ export class HUD {
       const percent = total > 0 ? (volume / total) * 100 : 0;
       const color = tokenColors.get(token) || hashColor(token);
       const hexColor = colorToHex(color);
+      const displayName = (tokenNames && tokenNames[token]) || token;
 
       const item = document.createElement('div');
       item.className = 'leaderboard-item';
@@ -186,7 +187,7 @@ export class HUD {
       item.innerHTML = `
         <div class="leaderboard-name">
           <span class="color-dot" style="background-color: ${hexColor};"></span>
-          ${token}
+          ${displayName}
         </div>
         <div class="leaderboard-value">$${this.formatNumber(volume)}</div>
         <div class="leaderboard-bar">
@@ -639,17 +640,9 @@ export class HUD {
   }
 
   private formatProgramName(program: string): string {
-    const names: Record<string, string> = {
-      'JUP': 'Jupiter',
-      'RAYDIUM_CLMM': 'Raydium CLMM',
-      'RAYDIUM_CP': 'Raydium CP',
-      'RAYDIUM_CPMM': 'Raydium CPMM',
-      'ORCA': 'Orca',
-      'PHOENIX': 'Phoenix',
-      'LIFINITY': 'Lifinity',
-      'FLASH': 'Flash',
-    };
-    return names[program] || program;
+    // programNames values are used as shortened IDs by the server,
+    // so the program string IS already the human-readable name
+    return program;
   }
 
   /**

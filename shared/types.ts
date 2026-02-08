@@ -127,6 +127,9 @@ export interface BlockMessage {
 
   // Trades bundled with block (optional, populated by server)
   trades?: TradeMessage[];
+
+  // Token name resolution (shortMint → $SYMBOL, populated by server via Jupiter API)
+  tokenNames?: Record<string, string>;
 }
 
 export type WSMessage = BatchMessage | StatsMessage | BlockCompleteMessage | BlockMessage;
