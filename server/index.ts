@@ -279,7 +279,7 @@ function transformBlockData(raw: any, trades: TradeMessage[]): BlockMessage {
   };
 }
 
-redisSubscriber.onBlock((rawBlock) => {
+redisSubscriber.onBlock(async (rawBlock) => {
   const now = Date.now();
   const blockGap = now - lastBlockTime;
   const slot = rawBlock.slot;
@@ -338,8 +338,7 @@ redisSubscriber.onBlock((rawBlock) => {
 
   const missingMints = tokenResolver.getMissing(topTokenMints);
   if (missingMints.length > 0) {
-    // Fire-and-forget: don't block broadcast on API call
-    tokenResolver.resolve(missingMints).catch(() => {});
+    await tokenResolver.resolve(missingMints);
   }
 
   // Attach resolved token names to the block message

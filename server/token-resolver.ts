@@ -31,12 +31,14 @@ export class TokenResolver {
     this.lastQueryTime = now;
 
     try {
-      // Jupiter token API - look up multiple mints
+      // Jupiter token search API - comma-separated mints, up to 100
       const mintList = mints.slice(0, 100).join(',');
-      const res = await fetch(`https://lite-api.jup.ag/tokens/v1/${mintList}`);
+      const url = `https://lite-api.jup.ag/tokens/v2/search?query=${mintList}`;
+      console.log(`TokenResolver: querying ${mints.length} mints...`);
+      const res = await fetch(url);
 
       if (!res.ok) {
-        console.error(`Jupiter API error: ${res.status}`);
+        console.error(`Jupiter API error: ${res.status} ${res.statusText}`);
         return;
       }
 
@@ -44,14 +46,14 @@ export class TokenResolver {
 
       if (Array.isArray(tokens)) {
         for (const token of tokens) {
-          if (token.address && token.symbol) {
-            this.cache.set(token.address, {
+          if (token.id && token.symbol) {
+            this.cache.set(token.id, {
               symbol: token.symbol,
               name: token.name || token.symbol,
             });
           }
         }
-        console.log(`TokenResolver: resolved ${tokens.length} tokens from Jupiter API`);
+        console.log(`TokenResolver: resolved ${tokens.length} tokens (cache size: ${this.cache.size})`);
       }
     } catch (err) {
       console.error('TokenResolver fetch error:', (err as Error).message);
