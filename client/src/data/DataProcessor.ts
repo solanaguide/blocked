@@ -65,6 +65,10 @@ export class DataProcessor {
     this.previousBlock = this.currentBlock;
     const oldSlot = this.previousBlock?.slot || 0;
 
+    // Reset per-block volume tracking so leaderboards show current block only
+    this.programVolumes.clear();
+    this.tokenVolumes.clear();
+
     // Update current block
     this.currentBlock = block;
     this.currentSlot = block.slot;
