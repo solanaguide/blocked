@@ -156,8 +156,6 @@ function processRawTrade(raw: any): TradeMessage {
     sig: raw.signature.slice(0, 8),
     ta: shortA,
     tb: shortB,
-    aa: raw.token_a.amount.toString(),
-    ab: raw.token_b.amount.toString(),
     vu: volumeUsd,
     p: shortenProgramId(raw.program_id),
   };

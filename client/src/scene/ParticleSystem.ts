@@ -222,8 +222,6 @@ export class ParticleSystem {
         sig: particleId,
         ta: '',
         tb: '',
-        aa: '0',
-        ab: '0',
         vu: 0,
         p: txType,
       };

@@ -6,8 +6,6 @@ export interface TradeMessage {
   sig: string;         // signature (first 8 chars)
   ta: string;          // token_a mint
   tb: string;          // token_b mint
-  aa: string;          // token_a amount
-  ab: string;          // token_b amount
   vu: number;          // volume USD
   p: string;           // program_id
   pp?: string;         // parent_program_id
