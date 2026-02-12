@@ -3,7 +3,7 @@
 export interface TradeMessage {
   s: number;           // slot
   t: number;           // timestamp (ms)
-  sig: string;         // transaction signature
+  idx: number;         // trade index within block (for /go/:slot/:idx links)
   ta: string;          // token_a mint
   tb: string;          // token_b mint
   vu: number;          // volume USD
@@ -54,8 +54,6 @@ export interface BlockFields {
 
   // Core block info
   slot: number;
-  parentSlot: number;
-  blockhash: string;
   blockTime: number;
   epoch: number;
   leader: string;
@@ -135,14 +133,12 @@ export interface CompactTrade {
   tb: number;   // index into tokenDex
   p: number;    // index into programDex
   vu: number;   // volume USD
-  sig: number;  // index into sigDex
   dt: number;   // timestamp delta (ms offset from blockTime)
 }
 
 export interface WireBlockMessage extends BlockFields {
   tokenDex: WireTokenEntry[];
   programDex: string[];
-  sigDex: string[];
   trades: CompactTrade[];
 }
 

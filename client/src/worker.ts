@@ -8,7 +8,7 @@ let wsUrl: string | null = null;
 
 // Decompress wire block message into the BlockMessage format expected by all client code
 function decompressBlock(wire: WireBlockMessage): BlockMessage {
-  const { tokenDex, programDex, sigDex, trades: compactTrades, ...blockFields } = wire;
+  const { tokenDex, programDex, trades: compactTrades, ...blockFields } = wire;
   const blockTimeMs = wire.blockTime * 1000;
 
   // Build tokenNames and tokenImages from the dex
@@ -25,10 +25,10 @@ function decompressBlock(wire: WireBlockMessage): BlockMessage {
   }
 
   // Expand compact trades into full TradeMessage[]
-  const trades: TradeMessage[] = compactTrades.map(ct => ({
+  const trades: TradeMessage[] = compactTrades.map((ct, i) => ({
     s: wire.slot,
     t: blockTimeMs + ct.dt,
-    sig: sigDex[ct.sig],
+    idx: i,
     ta: tokenDex[ct.ta].m,
     tb: tokenDex[ct.tb].m,
     vu: ct.vu,

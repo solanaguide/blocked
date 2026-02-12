@@ -144,7 +144,7 @@ export class ParticleSystem {
 
     // Create NEW particle (no recycling!)
     const particle: Particle = this.createNewParticle(slot);
-    particle.id = trade.sig;
+    particle.id = `${trade.s}:${trade.idx}`;
     particle.slot = slot;
     particle.position.copy(position);
     particle.velocity.copy(velocity);
@@ -219,7 +219,7 @@ export class ParticleSystem {
       particle.trade = {
         s: slot,
         t: Date.now(),
-        sig: particleId,
+        idx: 0,
         ta: '',
         tb: '',
         vu: 0,

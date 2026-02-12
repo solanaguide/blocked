@@ -6,7 +6,7 @@ import { RedisSubscriber } from './redis-client.js';
 import { config } from './config.js';
 import { TokenResolver } from './token-resolver.js';
 import { programNames } from '../shared/program-names.js';
-import type { WireBlockMessage, WireTokenEntry, CompactTrade, TradeMessage } from '../shared/types.js';
+import type { WireBlockMessage, WireTokenEntry, CompactTrade } from '../shared/types.js';
 
 const app = express();
 const server = createServer(app);
@@ -39,6 +39,9 @@ const networkCache: NetworkStateCache = {
 
 // Token name resolver (Jupiter API)
 const tokenResolver = new TokenResolver();
+
+// Signature cache for redirect route: slot → full signatures array
+const sigCache = new Map<number, string[]>();
 
 // Decay factor for rolling averages (applied per block)
 const CACHE_DECAY = 0.9;
@@ -86,6 +89,18 @@ app.get('/api/network-state', (req, res) => {
   });
 });
 
+// Redirect to Solscan transaction page by slot + trade index
+app.get('/go/:slot/:idx', (req, res) => {
+  const slot = parseInt(req.params.slot, 10);
+  const idx = parseInt(req.params.idx, 10);
+  const sigs = sigCache.get(slot);
+  if (!sigs || idx < 0 || idx >= sigs.length) {
+    res.status(404).send('Trade not found (block may have expired from cache)');
+    return;
+  }
+  res.redirect(302, `https://solscan.io/tx/${sigs[idx]}`);
+});
+
 // Serve static files (client build)
 app.use(express.static('dist/client'));
 
@@ -119,7 +134,13 @@ function broadcast(message: any) {
 // Trade accumulator - collect trades per slot, send with block
 let lastBlockTime = Date.now();
 
-interface AccumulatedTrade extends TradeMessage {
+interface AccumulatedTrade {
+  ta: string;          // shortened mint A (for network cache)
+  tb: string;          // shortened mint B (for network cache)
+  p: string;           // shortened program (for network cache)
+  vu: number;          // volume USD
+  t: number;           // timestamp (ms)
+  sig: string;         // full transaction signature (for redirect cache)
   fullMintA: string;   // full mint for token A (for dex building)
   fullMintB: string;   // full mint for token B (for dex building)
 }
@@ -146,7 +167,6 @@ function processRawTrade(raw: any): AccumulatedTrade {
                     (raw.token_a.price_usd / 1e12);
 
   return {
-    s: raw.slot,
     t: new Date(raw['@timestamp']).getTime(),
     sig: raw.signature,
     ta: shortenMint(raw.token_a.id),
@@ -190,14 +210,12 @@ redisSubscriber.onTrade((rawTrade) => {
 });
 
 // Transform raw Redis block data into BlockFields (no trades — attached separately as wire format)
-function transformBlockFields(raw: any): Omit<WireBlockMessage, 'tokenDex' | 'programDex' | 'sigDex' | 'trades'> {
+function transformBlockFields(raw: any): Omit<WireBlockMessage, 'tokenDex' | 'programDex' | 'trades'> {
   return {
     type: 'block',
 
     // Core block info
     slot: raw.slot,
-    parentSlot: raw.parent_slot,
-    blockhash: raw.blockhash,
     blockTime: raw.block_time,
     epoch: raw.epoch,
     leader: raw.leader,
@@ -269,15 +287,12 @@ function transformBlockFields(raw: any): Omit<WireBlockMessage, 'tokenDex' | 'pr
 function buildWireTrades(trades: AccumulatedTrade[], blockTimeSec: number): {
   tokenDex: WireTokenEntry[];
   programDex: string[];
-  sigDex: string[];
   compactTrades: CompactTrade[];
 } {
   const tokenIndexMap = new Map<string, number>();   // fullMint → index
   const programIndexMap = new Map<string, number>(); // shortProgram → index
-  const sigIndexMap = new Map<string, number>();     // signature → index
   const tokenDex: WireTokenEntry[] = [];
   const programDex: string[] = [];
-  const sigDex: string[] = [];
   const blockTimeMs = blockTimeSec * 1000;
 
   function getTokenIndex(fullMint: string): number {
@@ -305,26 +320,15 @@ function buildWireTrades(trades: AccumulatedTrade[], blockTimeSec: number): {
     return idx;
   }
 
-  function getSigIndex(sig: string): number {
-    let idx = sigIndexMap.get(sig);
-    if (idx === undefined) {
-      idx = sigDex.length;
-      sigIndexMap.set(sig, idx);
-      sigDex.push(sig);
-    }
-    return idx;
-  }
-
   const compactTrades: CompactTrade[] = trades.map(trade => ({
     ta: getTokenIndex(trade.fullMintA),
     tb: getTokenIndex(trade.fullMintB),
     p: getProgramIndex(trade.p),
     vu: trade.vu,
-    sig: getSigIndex(trade.sig),
     dt: trade.t - blockTimeMs,
   }));
 
-  return { tokenDex, programDex, sigDex, compactTrades };
+  return { tokenDex, programDex, compactTrades };
 }
 
 redisSubscriber.onBlock(async (rawBlock) => {
@@ -385,13 +389,22 @@ redisSubscriber.onBlock(async (rawBlock) => {
   }
 
   // Build wire-format compact trades with lookup tables
-  const { tokenDex, programDex, sigDex, compactTrades } = buildWireTrades(trades, rawBlock.block_time);
+  const { tokenDex, programDex, compactTrades } = buildWireTrades(trades, rawBlock.block_time);
+
+  // Cache signatures for redirect route (client links to /go/:slot/:idx)
+  sigCache.set(slot, trades.map(t => t.sig));
+  // Keep only last 10 blocks in cache
+  if (sigCache.size > 10) {
+    const oldest = Array.from(sigCache.keys()).sort((a, b) => a - b);
+    for (let i = 0; i < oldest.length - 10; i++) {
+      sigCache.delete(oldest[i]);
+    }
+  }
 
   const wireMessage: WireBlockMessage = {
     ...blockFields,
     tokenDex,
     programDex,
-    sigDex,
     trades: compactTrades,
   };
 

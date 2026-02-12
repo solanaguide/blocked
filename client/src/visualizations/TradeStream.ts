@@ -83,7 +83,7 @@ export class TradeStream extends BaseVisualization {
     const program = trade.p;
     const volume = trade.vu;
     const token = trade.ta || 'UNKNOWN';
-    const signature = trade.sig;
+    const signature = `${trade.s}/${trade.idx}`;
 
     // Create particle
     const size = Math.min(3, 0.5 + Math.log10(Math.max(1, volume)) * 0.3);
