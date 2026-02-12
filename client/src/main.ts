@@ -151,8 +151,10 @@ function handleWSMessage(message: WSMessage) {
 
         // Show notification for mega trades
         if (trade.vu > 1000000) {
+          const a = latestTokenNames[trade.ta] || trade.ta;
+          const b = latestTokenNames[trade.tb] || trade.tb;
           hud.showNotification(
-            `Mega Trade: $${(trade.vu / 1000000).toFixed(2)}M`,
+            `Mega Trade: ${a}/${b} $${(trade.vu / 1000000).toFixed(2)}M`,
             3000
           );
         }
