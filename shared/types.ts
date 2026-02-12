@@ -8,7 +8,6 @@ export interface TradeMessage {
   tb: string;          // token_b mint
   vu: number;          // volume USD
   p: string;           // program_id
-  pp?: string;         // parent_program_id
 }
 
 export interface StatsMessage {
@@ -48,10 +47,9 @@ export interface BlockCompleteMessage {
 }
 
 /**
- * Rich block data from block:update Redis channel
- * Provides comprehensive metrics for Volume (economic activity) and Revenue (network PMF)
+ * Block scalar fields shared between wire and client formats
  */
-export interface BlockMessage {
+export interface BlockFields {
   type: 'block';
 
   // Core block info
@@ -63,15 +61,15 @@ export interface BlockMessage {
   leader: string;
 
   // Transaction counts
-  txns: number;              // total transactions
-  votes: number;             // validator vote transactions
-  completed: number;         // completed non-vote (from 'success')
-  reverted: number;          // reverted non-vote (from 'failed')
+  txns: number;
+  votes: number;
+  completed: number;
+  reverted: number;
 
   // Compute Units
-  cu: number;                // total CU used
-  completedCu: number;       // CU by completed txns
-  revertedCu: number;        // CU by reverted txns
+  cu: number;
+  completedCu: number;
+  revertedCu: number;
   avgCu: number;
   medianCu: number;
 
@@ -102,7 +100,7 @@ export interface BlockMessage {
   // Swaps (VOLUME - economic activity)
   swapTxns: number;
   swapCount: number;
-  swapVolumeUsd: number;     // Already divided by 1e12 for USD
+  swapVolumeUsd: number;
   uniqueTraders: number;
   uniquePools: number;
   uniqueTokens: number;
@@ -110,7 +108,7 @@ export interface BlockMessage {
   // Transfers (VOLUME - economic activity)
   transferTxns: number;
   transferCount: number;
-  transferVolumeUsd: number; // Already divided by 1e12 for USD
+  transferVolumeUsd: number;
 
   // Accounts
   uniqueAccounts: number;
@@ -122,14 +120,39 @@ export interface BlockMessage {
   totalInstructions: number;
   totalInnerInstructions: number;
   avgCpiDepth: number;
+}
 
-  // Trades bundled with block (optional, populated by server)
+// --- Wire (compact) format sent by server ---
+
+export interface WireTokenEntry {
+  m: string;    // full mint address
+  s?: string;   // $SYMBOL
+  l?: string;   // logo URL
+}
+
+export interface CompactTrade {
+  ta: number;   // index into tokenDex
+  tb: number;   // index into tokenDex
+  p: number;    // index into programDex
+  vu: number;   // volume USD
+  sig: string;  // signature (first 8 chars)
+  t: number;    // timestamp (ms)
+}
+
+export interface WireBlockMessage extends BlockFields {
+  tokenDex: WireTokenEntry[];
+  programDex: string[];
+  trades: CompactTrade[];
+}
+
+// --- Client-side (expanded) format ---
+
+/**
+ * Rich block data - what client code consumes after decompression
+ */
+export interface BlockMessage extends BlockFields {
   trades?: TradeMessage[];
-
-  // Token name resolution (shortMint → $SYMBOL, populated by server via Jupiter API)
   tokenNames?: Record<string, string>;
-
-  // Token images ($SYMBOL → imageUrl, populated by server via Jupiter API)
   tokenImages?: Record<string, string>;
 }
 

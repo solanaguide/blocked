@@ -3,7 +3,7 @@
  * Resolves Solana token mint addresses to human-readable $SYMBOL names
  */
 
-interface TokenInfo {
+export interface TokenInfo {
   symbol: string;
   name: string;
   image?: string;
@@ -78,31 +78,9 @@ export class TokenResolver {
   }
 
   /**
-   * Build a tokenNames map: shortMint → $SYMBOL for all resolved tokens
-   * Uses the provided reverse map (shortMint → fullMint) to look up cached results
+   * Get cached TokenInfo by full mint address, or null if not cached
    */
-  buildTokenNames(reverseMap: Map<string, string>): Record<string, string> {
-    const result: Record<string, string> = {};
-    for (const [shortMint, fullMint] of reverseMap) {
-      const info = this.cache.get(fullMint);
-      if (info) {
-        result[shortMint] = `$${info.symbol}`;
-      }
-    }
-    return result;
-  }
-
-  /**
-   * Build a tokenImages map: $SYMBOL → imageUrl for all resolved tokens with icons
-   */
-  buildTokenImages(reverseMap: Map<string, string>): Record<string, string> {
-    const result: Record<string, string> = {};
-    for (const [, fullMint] of reverseMap) {
-      const info = this.cache.get(fullMint);
-      if (info?.image) {
-        result[`$${info.symbol}`] = info.image;
-      }
-    }
-    return result;
+  getTokenInfo(mint: string): TokenInfo | null {
+    return this.cache.get(mint) ?? null;
   }
 }

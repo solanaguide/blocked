@@ -6,7 +6,7 @@ import { RedisSubscriber } from './redis-client.js';
 import { config } from './config.js';
 import { TokenResolver } from './token-resolver.js';
 import { programNames } from '../shared/program-names.js';
-import type { BlockMessage, TradeMessage } from '../shared/types.js';
+import type { WireBlockMessage, WireTokenEntry, CompactTrade, TradeMessage } from '../shared/types.js';
 
 const app = express();
 const server = createServer(app);
@@ -39,9 +39,6 @@ const networkCache: NetworkStateCache = {
 
 // Token name resolver (Jupiter API)
 const tokenResolver = new TokenResolver();
-
-// Reverse map: shortMint → fullMint (populated during processRawTrade)
-const mintReverseMap: Map<string, string> = new Map();
 
 // Decay factor for rolling averages (applied per block)
 const CACHE_DECAY = 0.9;
@@ -121,7 +118,13 @@ function broadcast(message: any) {
 
 // Trade accumulator - collect trades per slot, send with block
 let lastBlockTime = Date.now();
-const tradesPerSlot: Map<number, TradeMessage[]> = new Map();
+
+interface AccumulatedTrade extends TradeMessage {
+  fullMintA: string;   // full mint for token A (for dex building)
+  fullMintB: string;   // full mint for token B (for dex building)
+  fullProgram: string; // full program ID (for dex building)
+}
+const tradesPerSlot: Map<number, AccumulatedTrade[]> = new Map();
 
 // Shorten program IDs using the full program names map
 function shortenProgramId(id: string): string {
@@ -138,33 +141,23 @@ function shortenMint(mint: string): string {
   return map[mint] || mint.slice(0, 8);
 }
 
-// Process raw trade into compact format
-function processRawTrade(raw: any): TradeMessage {
+// Process raw trade into compact format with full identifiers for dex building
+function processRawTrade(raw: any): AccumulatedTrade {
   const volumeUsd = (raw.token_a.amount / Math.pow(10, raw.token_a.decimals)) *
                     (raw.token_a.price_usd / 1e12);
 
-  const shortA = shortenMint(raw.token_a.id);
-  const shortB = shortenMint(raw.token_b.id);
-
-  // Populate reverse map for token name resolution
-  mintReverseMap.set(shortA, raw.token_a.id);
-  mintReverseMap.set(shortB, raw.token_b.id);
-
-  const trade: TradeMessage = {
+  return {
     s: raw.slot,
     t: new Date(raw['@timestamp']).getTime(),
     sig: raw.signature.slice(0, 8),
-    ta: shortA,
-    tb: shortB,
+    ta: shortenMint(raw.token_a.id),
+    tb: shortenMint(raw.token_b.id),
     vu: volumeUsd,
     p: shortenProgramId(raw.program_id),
+    fullMintA: raw.token_a.id,
+    fullMintB: raw.token_b.id,
+    fullProgram: raw.program_id,
   };
-
-  if (raw.parent_program_id) {
-    trade.pp = shortenProgramId(raw.parent_program_id);
-  }
-
-  return trade;
 }
 
 redisSubscriber.onTrade((rawTrade) => {
@@ -198,8 +191,8 @@ redisSubscriber.onTrade((rawTrade) => {
   networkCache.recentTrades += 1;
 });
 
-// Transform raw Redis block data into BlockMessage format
-function transformBlockData(raw: any, trades: TradeMessage[]): BlockMessage {
+// Transform raw Redis block data into BlockFields (no trades — attached separately as wire format)
+function transformBlockFields(raw: any): Omit<WireBlockMessage, 'tokenDex' | 'programDex' | 'trades'> {
   return {
     type: 'block',
 
@@ -271,10 +264,55 @@ function transformBlockData(raw: any, trades: TradeMessage[]): BlockMessage {
     totalInstructions: raw.total_instructions,
     totalInnerInstructions: raw.total_inner_instructions,
     avgCpiDepth: raw.avg_cpi_depth,
-
-    // Bundled trades
-    trades,
   };
+}
+
+// Build wire-format lookup tables and compact trades from accumulated trades
+function buildWireTrades(trades: AccumulatedTrade[]): {
+  tokenDex: WireTokenEntry[];
+  programDex: string[];
+  compactTrades: CompactTrade[];
+} {
+  const tokenIndexMap = new Map<string, number>();   // fullMint → index
+  const programIndexMap = new Map<string, number>(); // shortProgram → index
+  const tokenDex: WireTokenEntry[] = [];
+  const programDex: string[] = [];
+
+  function getTokenIndex(fullMint: string): number {
+    let idx = tokenIndexMap.get(fullMint);
+    if (idx === undefined) {
+      idx = tokenDex.length;
+      tokenIndexMap.set(fullMint, idx);
+      const info = tokenResolver.getTokenInfo(fullMint);
+      tokenDex.push({
+        m: fullMint,
+        s: info ? `$${info.symbol}` : undefined,
+        l: info?.image,
+      });
+    }
+    return idx;
+  }
+
+  function getProgramIndex(shortProgram: string): number {
+    let idx = programIndexMap.get(shortProgram);
+    if (idx === undefined) {
+      idx = programDex.length;
+      programIndexMap.set(shortProgram, idx);
+      programDex.push(shortProgram);
+    }
+    return idx;
+  }
+
+  const compactTrades: CompactTrade[] = trades.map(trade => ({
+    ta: getTokenIndex(trade.fullMintA),
+    tb: getTokenIndex(trade.fullMintB),
+    p: getProgramIndex(trade.p),
+    vu: trade.vu,
+    sig: trade.sig,
+    t: trade.t,
+  }));
+
+  return { tokenDex, programDex, compactTrades };
 }
 
 redisSubscriber.onBlock(async (rawBlock) => {
@@ -284,7 +322,7 @@ redisSubscriber.onBlock(async (rawBlock) => {
 
   // Get accumulated trades for this slot
   const trades = tradesPerSlot.get(slot) || [];
-  const blockMessage = transformBlockData(rawBlock, trades);
+  const blockFields = transformBlockFields(rawBlock);
 
   // Update network cache block info
   networkCache.lastBlockSlot = slot;
@@ -298,7 +336,6 @@ redisSubscriber.onBlock(async (rawBlock) => {
   networkCache.topPrograms.forEach((data, program) => {
     data.volume *= CACHE_DECAY;
     data.trades *= CACHE_DECAY;
-    // Remove entries with negligible values
     if (data.volume < 0.01 && data.trades < 0.01) {
       networkCache.topPrograms.delete(program);
     }
@@ -307,13 +344,12 @@ redisSubscriber.onBlock(async (rawBlock) => {
   networkCache.topTokens.forEach((data, token) => {
     data.volume *= CACHE_DECAY;
     data.trades *= CACHE_DECAY;
-    // Remove entries with negligible values
     if (data.volume < 0.01 && data.trades < 0.01) {
       networkCache.topTokens.delete(token);
     }
   });
 
-  // Diagnostic log - show what slots we have trades for
+  // Diagnostic log
   const trackedSlots = Array.from(tradesPerSlot.keys()).sort((a, b) => b - a).slice(0, 5);
   console.log(`BLOCK ${slot} | gap: ${blockGap}ms | trades: ${trades.length}/${rawBlock.swap_count} | tracked slots: [${trackedSlots.join(', ')}]`);
 
@@ -325,28 +361,29 @@ redisSubscriber.onBlock(async (rawBlock) => {
     }
   }
 
-  // Collect mints from this block's trades for token resolution
-  const blockMints = new Map<string, string>(); // shortMint → fullMint
-  for (const trade of trades) {
-    const fullA = mintReverseMap.get(trade.ta);
-    const fullB = mintReverseMap.get(trade.tb);
-    if (fullA) blockMints.set(trade.ta, fullA);
-    if (fullB) blockMints.set(trade.tb, fullB);
-  }
-
   // Resolve any unknown tokens via Jupiter API
-  const fullMints = Array.from(blockMints.values());
-  const missingMints = tokenResolver.getMissing(fullMints);
+  const fullMints = new Set<string>();
+  for (const trade of trades) {
+    fullMints.add(trade.fullMintA);
+    fullMints.add(trade.fullMintB);
+  }
+  const missingMints = tokenResolver.getMissing(Array.from(fullMints));
   if (missingMints.length > 0) {
     await tokenResolver.resolve(missingMints);
   }
 
-  // Attach resolved names and images for this block's tokens only
-  blockMessage.tokenNames = tokenResolver.buildTokenNames(blockMints);
-  blockMessage.tokenImages = tokenResolver.buildTokenImages(blockMints);
+  // Build wire-format compact trades with lookup tables
+  const { tokenDex, programDex, compactTrades } = buildWireTrades(trades);
+
+  const wireMessage: WireBlockMessage = {
+    ...blockFields,
+    tokenDex,
+    programDex,
+    trades: compactTrades,
+  };
 
   lastBlockTime = now;
-  broadcast(blockMessage);
+  broadcast(wireMessage);
 });
 
 // Start server
