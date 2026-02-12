@@ -10,7 +10,7 @@ import type { WireBlockMessage, WireTokenEntry, CompactTrade, TradeMessage } fro
 
 const app = express();
 const server = createServer(app);
-const wss = new WebSocketServer({ server, path: '/ws' });
+const wss = new WebSocketServer({ server, path: '/ws', perMessageDeflate: true });
 
 const redisSubscriber = new RedisSubscriber();
 
@@ -122,7 +122,6 @@ let lastBlockTime = Date.now();
 interface AccumulatedTrade extends TradeMessage {
   fullMintA: string;   // full mint for token A (for dex building)
   fullMintB: string;   // full mint for token B (for dex building)
-  fullProgram: string; // full program ID (for dex building)
 }
 const tradesPerSlot: Map<number, AccumulatedTrade[]> = new Map();
 
@@ -149,14 +148,13 @@ function processRawTrade(raw: any): AccumulatedTrade {
   return {
     s: raw.slot,
     t: new Date(raw['@timestamp']).getTime(),
-    sig: raw.signature.slice(0, 8),
+    sig: raw.signature,
     ta: shortenMint(raw.token_a.id),
     tb: shortenMint(raw.token_b.id),
     vu: volumeUsd,
     p: shortenProgramId(raw.program_id),
     fullMintA: raw.token_a.id,
     fullMintB: raw.token_b.id,
-    fullProgram: raw.program_id,
   };
 }
 
@@ -192,7 +190,7 @@ redisSubscriber.onTrade((rawTrade) => {
 });
 
 // Transform raw Redis block data into BlockFields (no trades — attached separately as wire format)
-function transformBlockFields(raw: any): Omit<WireBlockMessage, 'tokenDex' | 'programDex' | 'trades'> {
+function transformBlockFields(raw: any): Omit<WireBlockMessage, 'tokenDex' | 'programDex' | 'sigDex' | 'trades'> {
   return {
     type: 'block',
 
@@ -268,15 +266,19 @@ function transformBlockFields(raw: any): Omit<WireBlockMessage, 'tokenDex' | 'pr
 }
 
 // Build wire-format lookup tables and compact trades from accumulated trades
-function buildWireTrades(trades: AccumulatedTrade[]): {
+function buildWireTrades(trades: AccumulatedTrade[], blockTimeSec: number): {
   tokenDex: WireTokenEntry[];
   programDex: string[];
+  sigDex: string[];
   compactTrades: CompactTrade[];
 } {
   const tokenIndexMap = new Map<string, number>();   // fullMint → index
   const programIndexMap = new Map<string, number>(); // shortProgram → index
+  const sigIndexMap = new Map<string, number>();     // signature → index
   const tokenDex: WireTokenEntry[] = [];
   const programDex: string[] = [];
+  const sigDex: string[] = [];
+  const blockTimeMs = blockTimeSec * 1000;
 
   function getTokenIndex(fullMint: string): number {
     let idx = tokenIndexMap.get(fullMint);
@@ -285,7 +287,7 @@ function buildWireTrades(trades: AccumulatedTrade[]): {
       tokenIndexMap.set(fullMint, idx);
       const info = tokenResolver.getTokenInfo(fullMint);
       tokenDex.push({
-        m: fullMint,
+        m: shortenMint(fullMint),
         s: info ? `$${info.symbol}` : undefined,
         l: info?.image,
       });
@@ -303,16 +305,26 @@ function buildWireTrades(trades: AccumulatedTrade[]): {
     return idx;
   }
 
+  function getSigIndex(sig: string): number {
+    let idx = sigIndexMap.get(sig);
+    if (idx === undefined) {
+      idx = sigDex.length;
+      sigIndexMap.set(sig, idx);
+      sigDex.push(sig);
+    }
+    return idx;
+  }
+
   const compactTrades: CompactTrade[] = trades.map(trade => ({
     ta: getTokenIndex(trade.fullMintA),
     tb: getTokenIndex(trade.fullMintB),
     p: getProgramIndex(trade.p),
     vu: trade.vu,
-    sig: trade.sig,
-    t: trade.t,
+    sig: getSigIndex(trade.sig),
+    dt: trade.t - blockTimeMs,
   }));
 
-  return { tokenDex, programDex, compactTrades };
+  return { tokenDex, programDex, sigDex, compactTrades };
 }
 
 redisSubscriber.onBlock(async (rawBlock) => {
@@ -373,12 +385,13 @@ redisSubscriber.onBlock(async (rawBlock) => {
   }
 
   // Build wire-format compact trades with lookup tables
-  const { tokenDex, programDex, compactTrades } = buildWireTrades(trades);
+  const { tokenDex, programDex, sigDex, compactTrades } = buildWireTrades(trades, rawBlock.block_time);
 
   const wireMessage: WireBlockMessage = {
     ...blockFields,
     tokenDex,
     programDex,
+    sigDex,
     trades: compactTrades,
   };
 

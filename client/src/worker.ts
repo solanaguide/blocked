@@ -1,36 +1,23 @@
 // WebSocket worker - handles all data processing off main thread
 
-import type { WSMessage, BlockMessage, TradeMessage, WireBlockMessage, WireTokenEntry, CompactTrade } from '../../shared/types';
+import type { WSMessage, BlockMessage, TradeMessage, WireBlockMessage } from '../../shared/types';
 
 let ws: WebSocket | null = null;
 let reconnectTimer: number | null = null;
 let wsUrl: string | null = null;
 
-// Well-known mint → short name (must match server's shortenMint)
-const KNOWN_MINTS: Record<string, string> = {
-  'So11111111111111111111111111111111111111112': 'SOL',
-  'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v': 'USDC',
-  'Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB': 'USDT',
-};
-
-function shortenMint(mint: string): string {
-  return KNOWN_MINTS[mint] || mint.slice(0, 8);
-}
-
 // Decompress wire block message into the BlockMessage format expected by all client code
 function decompressBlock(wire: WireBlockMessage): BlockMessage {
-  const { tokenDex, programDex, trades: compactTrades, ...blockFields } = wire;
+  const { tokenDex, programDex, sigDex, trades: compactTrades, ...blockFields } = wire;
+  const blockTimeMs = wire.blockTime * 1000;
 
   // Build tokenNames and tokenImages from the dex
   const tokenNames: Record<string, string> = {};
   const tokenImages: Record<string, string> = {};
-  const shortMints: string[] = []; // parallel array: shortMint for each tokenDex index
 
   for (const entry of tokenDex) {
-    const short = shortenMint(entry.m);
-    shortMints.push(short);
     if (entry.s) {
-      tokenNames[short] = entry.s;
+      tokenNames[entry.m] = entry.s;
       if (entry.l) {
         tokenImages[entry.s] = entry.l;
       }
@@ -40,10 +27,10 @@ function decompressBlock(wire: WireBlockMessage): BlockMessage {
   // Expand compact trades into full TradeMessage[]
   const trades: TradeMessage[] = compactTrades.map(ct => ({
     s: wire.slot,
-    t: ct.t,
-    sig: ct.sig,
-    ta: shortMints[ct.ta],
-    tb: shortMints[ct.tb],
+    t: blockTimeMs + ct.dt,
+    sig: sigDex[ct.sig],
+    ta: tokenDex[ct.ta].m,
+    tb: tokenDex[ct.tb].m,
     vu: ct.vu,
     p: programDex[ct.p],
   }));

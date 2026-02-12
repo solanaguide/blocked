@@ -3,7 +3,7 @@
 export interface TradeMessage {
   s: number;           // slot
   t: number;           // timestamp (ms)
-  sig: string;         // signature (first 8 chars)
+  sig: string;         // transaction signature
   ta: string;          // token_a mint
   tb: string;          // token_b mint
   vu: number;          // volume USD
@@ -125,8 +125,8 @@ export interface BlockFields {
 // --- Wire (compact) format sent by server ---
 
 export interface WireTokenEntry {
-  m: string;    // full mint address
-  s?: string;   // $SYMBOL
+  m: string;    // shortened mint (e.g. "SOL", "EPjFWdd5")
+  s?: string;   // $SYMBOL (if resolved)
   l?: string;   // logo URL
 }
 
@@ -135,13 +135,14 @@ export interface CompactTrade {
   tb: number;   // index into tokenDex
   p: number;    // index into programDex
   vu: number;   // volume USD
-  sig: string;  // signature (first 8 chars)
-  t: number;    // timestamp (ms)
+  sig: number;  // index into sigDex
+  dt: number;   // timestamp delta (ms offset from blockTime)
 }
 
 export interface WireBlockMessage extends BlockFields {
   tokenDex: WireTokenEntry[];
   programDex: string[];
+  sigDex: string[];
   trades: CompactTrade[];
 }
 
