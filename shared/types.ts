@@ -130,6 +130,9 @@ export interface BlockMessage {
 
   // Token name resolution (shortMint → $SYMBOL, populated by server via Jupiter API)
   tokenNames?: Record<string, string>;
+
+  // Token images ($SYMBOL → imageUrl, populated by server via Jupiter API)
+  tokenImages?: Record<string, string>;
 }
 
 export type WSMessage = BatchMessage | StatsMessage | BlockCompleteMessage | BlockMessage;

@@ -6,6 +6,7 @@
 interface TokenInfo {
   symbol: string;
   name: string;
+  image?: string;
 }
 
 export class TokenResolver {
@@ -50,6 +51,7 @@ export class TokenResolver {
             this.cache.set(token.id, {
               symbol: token.symbol,
               name: token.name || token.symbol,
+              image: token.icon || undefined,
             });
           }
         }
@@ -85,6 +87,20 @@ export class TokenResolver {
       const info = this.cache.get(fullMint);
       if (info) {
         result[shortMint] = `$${info.symbol}`;
+      }
+    }
+    return result;
+  }
+
+  /**
+   * Build a tokenImages map: $SYMBOL → imageUrl for all resolved tokens with icons
+   */
+  buildTokenImages(reverseMap: Map<string, string>): Record<string, string> {
+    const result: Record<string, string> = {};
+    for (const [, fullMint] of reverseMap) {
+      const info = this.cache.get(fullMint);
+      if (info?.image) {
+        result[`$${info.symbol}`] = info.image;
       }
     }
     return result;

@@ -327,22 +327,25 @@ redisSubscriber.onBlock(async (rawBlock) => {
     }
   }
 
-  // Resolve token names via Jupiter API
-  // Collect top 50 tokens by volume and resolve any missing names
-  const topTokenMints = Array.from(networkCache.topTokens.entries())
-    .sort((a, b) => b[1].volume - a[1].volume)
-    .slice(0, 50)
-    .map(([shortMint]) => shortMint)
-    .map(shortMint => mintReverseMap.get(shortMint))
-    .filter((fullMint): fullMint is string => !!fullMint);
+  // Collect mints from this block's trades for token resolution
+  const blockMints = new Map<string, string>(); // shortMint → fullMint
+  for (const trade of trades) {
+    const fullA = mintReverseMap.get(trade.ta);
+    const fullB = mintReverseMap.get(trade.tb);
+    if (fullA) blockMints.set(trade.ta, fullA);
+    if (fullB) blockMints.set(trade.tb, fullB);
+  }
 
-  const missingMints = tokenResolver.getMissing(topTokenMints);
+  // Resolve any unknown tokens via Jupiter API
+  const fullMints = Array.from(blockMints.values());
+  const missingMints = tokenResolver.getMissing(fullMints);
   if (missingMints.length > 0) {
     await tokenResolver.resolve(missingMints);
   }
 
-  // Attach resolved token names to the block message
-  blockMessage.tokenNames = tokenResolver.buildTokenNames(mintReverseMap);
+  // Attach resolved names and images for this block's tokens only
+  blockMessage.tokenNames = tokenResolver.buildTokenNames(blockMints);
+  blockMessage.tokenImages = tokenResolver.buildTokenImages(blockMints);
 
   lastBlockTime = now;
   broadcast(blockMessage);

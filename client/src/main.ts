@@ -113,6 +113,7 @@ let tradesThisSecond = 0;
 let volumeThisSecond = 0;
 let lastTpsUpdate = Date.now();
 let latestTokenNames: Record<string, string> = {};
+let latestTokenImages: Record<string, string> = {};
 
 // Handle worker messages
 worker.onmessage = (event) => {
@@ -162,9 +163,12 @@ function handleWSMessage(message: WSMessage) {
     }
     currentSlot = block.slot;
 
-    // Store latest token names from server (persists across blocks)
+    // Accumulate token metadata from server (persists across blocks)
     if (block.tokenNames) {
       latestTokenNames = { ...latestTokenNames, ...block.tokenNames };
+    }
+    if (block.tokenImages) {
+      latestTokenImages = { ...latestTokenImages, ...block.tokenImages };
     }
 
     // Update top programs and tokens leaderboards
