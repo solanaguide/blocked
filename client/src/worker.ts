@@ -43,22 +43,18 @@ function decompressBlock(wire: WireBlockMessage): BlockMessage {
   };
 }
 
-// Determine WebSocket URL
+// WebSocket URL — baked in at build time, or derived from current host
+const WS_URL = typeof __WS_URL__ === 'string' ? __WS_URL__ : null;
+
 function getWsUrl(): string {
-  // Check for explicit WS URL in query params
-  // This allows the embedding page to specify: ?ws=wss://live.example.com/ws
-  const params = new URLSearchParams(self.location.search);
-  const explicitUrl = params.get('ws');
-  if (explicitUrl) {
-    return explicitUrl;
-  }
+  if (WS_URL) return WS_URL;
 
   // Development: connect to production WS server
   if (self.location.hostname === 'localhost' || self.location.hostname === '127.0.0.1') {
     return 'wss://live.solanacompass.com/ws';
   }
 
-  // Production: same host, /ws path
+  // Default: same host
   const protocol = self.location.protocol === 'https:' ? 'wss:' : 'ws:';
   return `${protocol}//${self.location.host}/ws`;
 }

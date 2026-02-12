@@ -4,6 +4,9 @@ export default defineConfig({
   root: 'client',
   publicDir: 'public',
   base: process.env.VITE_BASE_PATH || '/',
+  define: {
+    __WS_URL__: JSON.stringify(process.env.VITE_WS_URL || ''),
+  },
   server: {
     port: 3000,
     proxy: {
