@@ -3,6 +3,7 @@ import { defineConfig } from 'vite';
 export default defineConfig({
   root: 'client',
   publicDir: 'public',
+  base: process.env.VITE_BASE_PATH || '/',
   server: {
     port: 3000,
     proxy: {
