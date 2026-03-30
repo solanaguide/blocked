@@ -1,10 +1,11 @@
 // WebSocket worker - handles all data processing off main thread
 
-import type { WSMessage, BlockMessage, TradeMessage, WireBlockMessage } from '../../shared/types';
+import type { WSMessage, BlockMessage, TradeMessage, WireBlockMessage, AggregatedBlockFields } from '../../shared/types';
 
 let ws: WebSocket | null = null;
 let reconnectTimer: number | null = null;
 let wsUrl: string | null = null;
+let subscribeChannels: string[] | null = null;
 
 // Decompress wire block message into the BlockMessage format expected by all client code
 function decompressBlock(wire: WireBlockMessage): BlockMessage {
@@ -70,6 +71,11 @@ function connect() {
   ws.onopen = () => {
     postMessage({ type: 'connected' });
 
+    // Send subscription if channels were configured
+    if (subscribeChannels && ws) {
+      ws.send(JSON.stringify({ type: 'subscribe', channels: subscribeChannels }));
+    }
+
     if (reconnectTimer) {
       clearTimeout(reconnectTimer);
       reconnectTimer = null;
@@ -79,6 +85,15 @@ function connect() {
   ws.onmessage = (event) => {
     try {
       const raw = JSON.parse(event.data);
+
+      // Aggregated messages pass through directly
+      if (raw.type === 'aggregated') {
+        postMessage({
+          type: 'ws_message',
+          data: raw as AggregatedBlockFields,
+        });
+        return;
+      }
 
       // Detect wire format: if tokenDex exists, decompress; otherwise pass through
       let message: WSMessage;
@@ -129,6 +144,14 @@ self.onmessage = (event) => {
     wsUrl = data;
     if (ws) {
       ws.close();
+    }
+  }
+
+  // Allow main thread to update channel subscriptions
+  if (type === 'set_channels') {
+    subscribeChannels = data;
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ type: 'subscribe', channels: data }));
     }
   }
 };

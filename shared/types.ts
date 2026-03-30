@@ -153,4 +153,91 @@ export interface BlockMessage extends BlockFields {
   tokenImages?: Record<string, string>;
 }
 
-export type WSMessage = BatchMessage | StatsMessage | BlockCompleteMessage | BlockMessage;
+export type WSMessage = BatchMessage | StatsMessage | BlockCompleteMessage | BlockMessage | AggregatedBlockFields;
+
+// --- Time-based aggregation ---
+
+export type AggregationInterval = '1s' | '5s' | '60s' | '5m';
+
+export const VALID_INTERVALS: AggregationInterval[] = ['1s', '5s', '60s', '5m'];
+
+/**
+ * Aggregated block data rolled up over a time window.
+ * Sent via WebSocket on interval completion and available via REST API.
+ *
+ * Aggregation strategies:
+ *  - Sum: additive totals (txns, fees, volumes, counts)
+ *  - Weighted avg: weighted by per-block txn count (avgCu, avgFee, etc.)
+ *  - Max: peak value across blocks (priorityMax, unique* counts)
+ *  - Min: floor value across blocks (priorityMin)
+ *  - Latest: most recent block's value (slot, epoch, leader)
+ */
+export interface AggregatedBlockFields {
+  type: 'aggregated';
+  interval: AggregationInterval;
+  bucketStart: number;      // Unix timestamp (seconds) of bucket start
+  bucketEnd: number;        // Unix timestamp (seconds) of bucket end
+  blockCount: number;       // How many blocks fell into this bucket
+  isPartial: boolean;       // True if bucket is still accumulating
+
+  // --- Latest (most recent block) ---
+  slot: number;
+  blockTime: number;
+  epoch: number;
+  leader: string;
+
+  // --- Summed ---
+  txns: number;
+  votes: number;
+  completed: number;
+  reverted: number;
+  cu: number;
+  completedCu: number;
+  revertedCu: number;
+  allFees: number;
+  baseFees: number;
+  priorityFees: number;
+  rewards: number;
+  jitoTxns: number;
+  jitoTotal: number;
+  jitoCu: number;
+  priorityTxns: number;
+  dualTipTxns: number;
+  swapTxns: number;
+  swapCount: number;
+  swapVolumeUsd: number;
+  transferTxns: number;
+  transferCount: number;
+  transferVolumeUsd: number;
+  totalInstructions: number;
+  totalInnerInstructions: number;
+
+  // --- Weighted average (by txn count) ---
+  avgCu: number;
+  medianCu: number;
+  avgFee: number;
+  medianFee: number;
+  jitoAvgTip: number;
+  jitoMedianTip: number;
+  priorityAvg: number;
+  priorityMedian: number;
+  avgCpiDepth: number;
+  feesPerVolumeBps: number;
+
+  // --- Max ---
+  priorityMax: number;
+  uniqueTraders: number;
+  uniquePools: number;
+  uniqueTokens: number;
+  uniqueAccounts: number;
+  uniqueWritable: number;
+  uniquePrograms: number;
+  uniqueSigners: number;
+
+  // --- Min ---
+  priorityMin: number;
+
+  // --- Leaderboards (top 10 by volume within this bucket) ---
+  topPrograms: Array<{ id: string; volume: number; trades: number }>;
+  topTokens: Array<{ id: string; volume: number; trades: number }>;
+}

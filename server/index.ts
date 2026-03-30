@@ -6,7 +6,10 @@ import { RedisSubscriber } from './redis-client.js';
 import { config } from './config.js';
 import { TokenResolver } from './token-resolver.js';
 import { programNames } from '../shared/program-names.js';
-import type { WireBlockMessage, WireTokenEntry, CompactTrade } from '../shared/types.js';
+import type { WireBlockMessage, WireTokenEntry, CompactTrade, AggregationInterval, BlockFields } from '../shared/types.js';
+import { VALID_INTERVALS } from '../shared/types.js';
+import { TimeAggregator } from './time-aggregator.js';
+import type { TradeSummary } from './time-aggregator.js';
 
 const app = express();
 const server = createServer(app);
@@ -14,9 +17,18 @@ const wss = new WebSocketServer({ server, path: '/ws', perMessageDeflate: true }
 
 const redisSubscriber = new RedisSubscriber();
 
-const clients = new Set<WebSocket>();
+interface ClientState {
+  channels: Set<string>;
+}
+
+const clients = new Map<WebSocket, ClientState>();
 let redisConnected = false;
 const startTime = Date.now();
+
+const timeAggregator = new TimeAggregator();
+timeAggregator.onBucketComplete((interval, data) => {
+  broadcast(data, interval);
+});
 
 // Network state cache for instant visualization startup
 interface NetworkStateCache {
@@ -101,6 +113,18 @@ app.get('/go/:slot/:idx', (req, res) => {
   res.redirect(302, `https://solscan.io/tx/${sigs[idx]}`);
 });
 
+// Aggregated data endpoints
+app.get('/api/aggregated/:interval', (req, res) => {
+  const interval = req.params.interval as AggregationInterval;
+  if (!VALID_INTERVALS.includes(interval)) {
+    res.status(400).json({ error: `Invalid interval. Use: ${VALID_INTERVALS.join(', ')}` });
+    return;
+  }
+  const latest = timeAggregator.getLatestSnapshot(interval);
+  const history = timeAggregator.getHistory(interval);
+  res.json({ latest, history });
+});
+
 // Serve static files (client build)
 app.use(express.static('dist/client'));
 
@@ -108,7 +132,24 @@ app.use(express.static('dist/client'));
 wss.on('connection', (ws, req) => {
   const clientIp = req.headers['x-forwarded-for'] || req.socket.remoteAddress;
   console.log(`WS connect: ${clientIp} (${clients.size + 1} total)`);
-  clients.add(ws);
+  clients.set(ws, { channels: new Set(['blocks']) });
+
+  ws.on('message', (raw) => {
+    try {
+      const msg = JSON.parse(raw.toString());
+      if (msg.type === 'subscribe' && Array.isArray(msg.channels)) {
+        const validSet = new Set<string>(['blocks', ...VALID_INTERVALS]);
+        const channels = new Set<string>(
+          msg.channels.filter((c: string) => validSet.has(c))
+        );
+        if (channels.size > 0) {
+          const state = clients.get(ws);
+          if (state) state.channels = channels;
+          console.log(`WS subscribe [${clientIp}]: ${Array.from(channels).join(', ')}`);
+        }
+      }
+    } catch { /* ignore malformed messages */ }
+  });
 
   ws.on('close', () => {
     clients.delete(ws);
@@ -121,14 +162,14 @@ wss.on('connection', (ws, req) => {
   });
 });
 
-// Broadcast to all connected clients
-function broadcast(message: any) {
+// Broadcast to subscribed clients
+function broadcast(message: any, channel: string = 'blocks') {
   const data = JSON.stringify(message);
-  clients.forEach((client) => {
-    if (client.readyState === WebSocket.OPEN) {
-      client.send(data);
+  for (const [ws, state] of clients) {
+    if (ws.readyState === WebSocket.OPEN && state.channels.has(channel)) {
+      ws.send(data);
     }
-  });
+  }
 }
 
 // Trade accumulator - collect trades per slot, send with block
@@ -408,6 +449,14 @@ redisSubscriber.onBlock(async (rawBlock) => {
     trades: compactTrades,
   };
 
+  // Feed block + trade summaries to time aggregator
+  const tradeSummaries: TradeSummary[] = trades.map(t => ({
+    program: t.p,
+    tokenA: t.ta,
+    volume: t.vu,
+  }));
+  timeAggregator.ingestBlock(blockFields as BlockFields, tradeSummaries);
+
   lastBlockTime = now;
   broadcast(wireMessage);
 });
@@ -417,6 +466,8 @@ async function start() {
   try {
     await redisSubscriber.subscribe();
     redisConnected = true;
+
+    timeAggregator.start();
 
     server.listen(config.websocket.port, () => {
       console.log(`Server started on port ${config.websocket.port}`);
@@ -433,6 +484,7 @@ async function start() {
 // Graceful shutdown
 process.on('SIGINT', async () => {
   console.log('\nShutting down...');
+  timeAggregator.stop();
   await redisSubscriber.close();
   server.close();
   process.exit(0);
@@ -440,6 +492,7 @@ process.on('SIGINT', async () => {
 
 process.on('SIGTERM', async () => {
   console.log('\nSIGTERM received, shutting down...');
+  timeAggregator.stop();
   await redisSubscriber.close();
   server.close();
   process.exit(0);
