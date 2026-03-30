@@ -253,22 +253,24 @@ export class TimeAggregator {
 
     // Accumulate trade leaderboards
     for (const trade of trades) {
+      const vol = trade.volume || 0; // guard NaN/undefined
+
       // Program
       const prog = bucket.programVolumes.get(trade.program);
       if (prog) {
-        prog.volume += trade.volume;
+        prog.volume += vol;
         prog.trades++;
       } else {
-        bucket.programVolumes.set(trade.program, { volume: trade.volume, trades: 1 });
+        bucket.programVolumes.set(trade.program, { volume: vol, trades: 1 });
       }
 
       // Token (count token A — the primary side)
       const tok = bucket.tokenVolumes.get(trade.tokenA);
       if (tok) {
-        tok.volume += trade.volume;
+        tok.volume += vol;
         tok.trades++;
       } else {
-        bucket.tokenVolumes.set(trade.tokenA, { volume: trade.volume, trades: 1 });
+        bucket.tokenVolumes.set(trade.tokenA, { volume: vol, trades: 1 });
       }
     }
   }
