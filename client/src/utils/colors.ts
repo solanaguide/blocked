@@ -10,20 +10,20 @@ export const txTypeColors = {
 };
 
 export const programColors: Map<string, number> = new Map([
-  ['JUP', 0xb026ff],          // Jupiter - Electric Purple
-  ['RAYDIUM_CLMM', 0x00f0ff], // Raydium CLMM - Neon Blue
-  ['RAYDIUM_CP', 0xff006e],   // Raydium CP - Hot Pink
-  ['RAYDIUM_CPMM', 0xff1493], // Raydium CPMM - Deep Pink
-  ['ORCA', 0x00ffd4],         // Orca - Cyan
-  ['PHOENIX', 0xff6b35],      // Phoenix - Orange
-  ['LIFINITY', 0x00ff88],     // Lifinity - Green
-  ['FLASH', 0xffff00],        // Flash - Yellow
+  ['JUPyiwrYJFskUPiHa7hkeR8VUtAeFoSYbKedZNsDvCN', 0xb026ff],   // Jupiter V6 - Electric Purple
+  ['CAMMCzo5YL8w4VFF8KVHrK22GGUsp5VTaW7grrKgrWqK', 0x00f0ff],  // Raydium CLMM - Neon Blue
+  ['CPMMoo8L3F4NbTegBCKVNunggL7H1ZpdTHKxQB5qKP1C', 0xff006e],  // Raydium CP - Hot Pink
+  ['CPMDWBwJDtYax9qW7AyRuVC19Cc4L4Vcy4n2BHAbHkCi', 0xff1493],  // Raydium CPMM - Deep Pink
+  ['whirLbMiicVdio4qvUfM5KAg6Ct8VwpYzGff3uctyCc', 0x00ffd4],   // Orca - Cyan
+  ['PhoeNiXZ8ByJGLkxNfZRnkUfjvmuYqLR89jjFHGqdXY', 0xff6b35],   // Phoenix - Orange
+  ['EewxydAPCCVuNEyrVN68PuSYdQ7wKn27V9Gjeoi8dy3S', 0x00ff88],  // Lifinity V2 - Green
+  ['FLASHhBpjSEQqKSACYmfHdNnBGUENCdRj1tnHbTgpkC', 0xffff00],  // Flash - Yellow
 ]);
 
 export const tokenColors: Map<string, number> = new Map([
-  ['SOL', 0x9945ff],    // Solana purple (brand color)
-  ['USDC', 0x00d4ff],   // Bright cyan/blue
-  ['USDT', 0x00ff88],   // Bright green
+  ['So11111111111111111111111111111111111111112', 0x9945ff],          // SOL - Solana purple
+  ['EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v', 0x00d4ff],     // USDC - Bright cyan/blue
+  ['Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB', 0x00ff88],      // USDT - Bright green
 ]);
 
 export function hashColor(str: string): number {

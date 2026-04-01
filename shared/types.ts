@@ -123,9 +123,14 @@ export interface BlockFields {
 // --- Wire (compact) format sent by server ---
 
 export interface WireTokenEntry {
-  m: string;    // shortened mint (e.g. "SOL", "EPjFWdd5")
+  m: string;    // full mint address (base58)
   s?: string;   // $SYMBOL (if resolved)
   l?: string;   // logo URL
+}
+
+export interface WireProgramEntry {
+  id: string;   // full program address (base58)
+  n: string;    // display name
 }
 
 export interface CompactTrade {
@@ -138,7 +143,7 @@ export interface CompactTrade {
 
 export interface WireBlockMessage extends BlockFields {
   tokenDex: WireTokenEntry[];
-  programDex: string[];
+  programDex: WireProgramEntry[];
   trades: CompactTrade[];
 }
 
@@ -149,8 +154,9 @@ export interface WireBlockMessage extends BlockFields {
  */
 export interface BlockMessage extends BlockFields {
   trades?: TradeMessage[];
-  tokenNames?: Record<string, string>;
-  tokenImages?: Record<string, string>;
+  tokenNames?: Record<string, string>;    // full mint → $SYMBOL
+  tokenImages?: Record<string, string>;   // $SYMBOL → logo URL
+  programNames?: Record<string, string>;  // full program address → display name
 }
 
 export type WSMessage = BatchMessage | StatsMessage | BlockCompleteMessage | BlockMessage | AggregatedBlockFields;

@@ -114,6 +114,7 @@ let volumeThisSecond = 0;
 let lastTpsUpdate = Date.now();
 let latestTokenNames: Record<string, string> = {};
 let latestTokenImages: Record<string, string> = {};
+let latestProgramNames: Record<string, string> = {};
 
 // Handle worker messages
 worker.onmessage = (event) => {
@@ -163,18 +164,21 @@ function handleWSMessage(message: WSMessage) {
     }
     currentSlot = block.slot;
 
-    // Accumulate token metadata from server (persists across blocks)
+    // Accumulate token/program metadata from server (persists across blocks)
     if (block.tokenNames) {
       latestTokenNames = { ...latestTokenNames, ...block.tokenNames };
     }
     if (block.tokenImages) {
       latestTokenImages = { ...latestTokenImages, ...block.tokenImages };
     }
+    if (block.programNames) {
+      latestProgramNames = { ...latestProgramNames, ...block.programNames };
+    }
 
     // Update top programs and tokens leaderboards
     const programVolumes = dataProcessor.getProgramVolumes();
     const tokenVolumes = dataProcessor.getTokenVolumes();
-    hud.updateProgramStats(Object.fromEntries(programVolumes));
+    hud.updateProgramStats(Object.fromEntries(programVolumes), undefined, latestProgramNames);
     hud.updateTokenStats(Object.fromEntries(tokenVolumes), undefined, latestTokenNames);
 
     // Add block log entry

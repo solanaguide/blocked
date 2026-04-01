@@ -6,7 +6,7 @@ import { RedisSubscriber } from './redis-client.js';
 import { config } from './config.js';
 import { TokenResolver } from './token-resolver.js';
 import { programNames } from '../shared/program-names.js';
-import type { WireBlockMessage, WireTokenEntry, CompactTrade, AggregationInterval, BlockFields } from '../shared/types.js';
+import type { WireBlockMessage, WireTokenEntry, WireProgramEntry, CompactTrade, AggregationInterval, BlockFields } from '../shared/types.js';
 import { VALID_INTERVALS } from '../shared/types.js';
 import { TimeAggregator } from './time-aggregator.js';
 import type { TradeSummary } from './time-aggregator.js';
@@ -176,33 +176,16 @@ function broadcast(message: any, channel: string = 'blocks') {
 let lastBlockTime = Date.now();
 
 interface AccumulatedTrade {
-  ta: string;          // shortened mint A (for network cache)
-  tb: string;          // shortened mint B (for network cache)
-  p: string;           // shortened program (for network cache)
+  ta: string;          // full mint address for token A
+  tb: string;          // full mint address for token B
+  p: string;           // full program address
   vu: number;          // volume USD
   t: number;           // timestamp (ms)
   sig: string;         // full transaction signature (for redirect cache)
-  fullMintA: string;   // full mint for token A (for dex building)
-  fullMintB: string;   // full mint for token B (for dex building)
 }
 const tradesPerSlot: Map<number, AccumulatedTrade[]> = new Map();
 
-// Shorten program IDs using the full program names map
-function shortenProgramId(id: string): string {
-  return programNames[id] || id.slice(0, 8);
-}
-
-// Shorten token mints
-function shortenMint(mint: string): string {
-  const map: Record<string, string> = {
-    'So11111111111111111111111111111111111111112': 'SOL',
-    'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v': 'USDC',
-    'Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB': 'USDT',
-  };
-  return map[mint] || mint.slice(0, 8);
-}
-
-// Process raw trade into compact format with full identifiers for dex building
+// Process raw trade — all identifiers are full base58 addresses
 function processRawTrade(raw: any): AccumulatedTrade {
   const volumeUsd = (raw.token_a.amount / Math.pow(10, raw.token_a.decimals)) *
                     (raw.token_a.price_usd / 1e12);
@@ -210,12 +193,10 @@ function processRawTrade(raw: any): AccumulatedTrade {
   return {
     t: new Date(raw['@timestamp']).getTime(),
     sig: raw.signature,
-    ta: shortenMint(raw.token_a.id),
-    tb: shortenMint(raw.token_b.id),
+    ta: raw.token_a.id,
+    tb: raw.token_b.id,
     vu: volumeUsd,
-    p: shortenProgramId(raw.program_id),
-    fullMintA: raw.token_a.id,
-    fullMintB: raw.token_b.id,
+    p: raw.program_id,
   };
 }
 
@@ -327,23 +308,23 @@ function transformBlockFields(raw: any): Omit<WireBlockMessage, 'tokenDex' | 'pr
 // Build wire-format lookup tables and compact trades from accumulated trades
 function buildWireTrades(trades: AccumulatedTrade[], blockTimeSec: number): {
   tokenDex: WireTokenEntry[];
-  programDex: string[];
+  programDex: WireProgramEntry[];
   compactTrades: CompactTrade[];
 } {
   const tokenIndexMap = new Map<string, number>();   // fullMint → index
-  const programIndexMap = new Map<string, number>(); // shortProgram → index
+  const programIndexMap = new Map<string, number>(); // fullProgramId → index
   const tokenDex: WireTokenEntry[] = [];
-  const programDex: string[] = [];
+  const programDex: WireProgramEntry[] = [];
   const blockTimeMs = blockTimeSec * 1000;
 
-  function getTokenIndex(fullMint: string): number {
-    let idx = tokenIndexMap.get(fullMint);
+  function getTokenIndex(mint: string): number {
+    let idx = tokenIndexMap.get(mint);
     if (idx === undefined) {
       idx = tokenDex.length;
-      tokenIndexMap.set(fullMint, idx);
-      const info = tokenResolver.getTokenInfo(fullMint);
+      tokenIndexMap.set(mint, idx);
+      const info = tokenResolver.getTokenInfo(mint);
       tokenDex.push({
-        m: shortenMint(fullMint),
+        m: mint,
         s: info ? `$${info.symbol}` : undefined,
         l: info?.image,
       });
@@ -351,19 +332,22 @@ function buildWireTrades(trades: AccumulatedTrade[], blockTimeSec: number): {
     return idx;
   }
 
-  function getProgramIndex(shortProgram: string): number {
-    let idx = programIndexMap.get(shortProgram);
+  function getProgramIndex(programId: string): number {
+    let idx = programIndexMap.get(programId);
     if (idx === undefined) {
       idx = programDex.length;
-      programIndexMap.set(shortProgram, idx);
-      programDex.push(shortProgram);
+      programIndexMap.set(programId, idx);
+      programDex.push({
+        id: programId,
+        n: programNames[programId] || programId,
+      });
     }
     return idx;
   }
 
   const compactTrades: CompactTrade[] = trades.map(trade => ({
-    ta: getTokenIndex(trade.fullMintA),
-    tb: getTokenIndex(trade.fullMintB),
+    ta: getTokenIndex(trade.ta),
+    tb: getTokenIndex(trade.tb),
     p: getProgramIndex(trade.p),
     vu: trade.vu,
     dt: trade.t - blockTimeMs,
@@ -419,12 +403,12 @@ redisSubscriber.onBlock(async (rawBlock) => {
   }
 
   // Resolve any unknown tokens via Jupiter API
-  const fullMints = new Set<string>();
+  const mints = new Set<string>();
   for (const trade of trades) {
-    fullMints.add(trade.fullMintA);
-    fullMints.add(trade.fullMintB);
+    mints.add(trade.ta);
+    mints.add(trade.tb);
   }
-  const missingMints = tokenResolver.getMissing(Array.from(fullMints));
+  const missingMints = tokenResolver.getMissing(Array.from(mints));
   if (missingMints.length > 0) {
     await tokenResolver.resolve(missingMints);
   }

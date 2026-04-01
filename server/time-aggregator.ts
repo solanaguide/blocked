@@ -2,8 +2,8 @@ import type { BlockFields, AggregationInterval, AggregatedBlockFields } from '..
 
 // Trade summary passed alongside each block for leaderboard accumulation
 export interface TradeSummary {
-  program: string;   // shortened program name
-  tokenA: string;    // shortened mint A
+  program: string;   // full program address
+  tokenA: string;    // full mint address
   volume: number;    // USD volume
 }
 

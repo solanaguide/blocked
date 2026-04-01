@@ -12,7 +12,7 @@ function decompressBlock(wire: WireBlockMessage): BlockMessage {
   const { tokenDex, programDex, trades: compactTrades, ...blockFields } = wire;
   const blockTimeMs = wire.blockTime * 1000;
 
-  // Build tokenNames and tokenImages from the dex
+  // Build tokenNames and tokenImages from the dex (keyed by full mint address)
   const tokenNames: Record<string, string> = {};
   const tokenImages: Record<string, string> = {};
 
@@ -25,6 +25,12 @@ function decompressBlock(wire: WireBlockMessage): BlockMessage {
     }
   }
 
+  // Build programNames from the dex (keyed by full program address)
+  const programDisplayNames: Record<string, string> = {};
+  for (const entry of programDex) {
+    programDisplayNames[entry.id] = entry.n;
+  }
+
   // Expand compact trades into full TradeMessage[]
   const trades: TradeMessage[] = compactTrades.map((ct, i) => ({
     s: wire.slot,
@@ -33,7 +39,7 @@ function decompressBlock(wire: WireBlockMessage): BlockMessage {
     ta: tokenDex[ct.ta].m,
     tb: tokenDex[ct.tb].m,
     vu: ct.vu,
-    p: programDex[ct.p],
+    p: programDex[ct.p].id,
   }));
 
   return {
@@ -41,6 +47,7 @@ function decompressBlock(wire: WireBlockMessage): BlockMessage {
     trades,
     tokenNames: Object.keys(tokenNames).length > 0 ? tokenNames : undefined,
     tokenImages: Object.keys(tokenImages).length > 0 ? tokenImages : undefined,
+    programNames: Object.keys(programDisplayNames).length > 0 ? programDisplayNames : undefined,
   };
 }
 

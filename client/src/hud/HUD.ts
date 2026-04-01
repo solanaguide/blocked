@@ -100,7 +100,7 @@ export class HUD {
     if (elem) elem.textContent = mode.toUpperCase();
   }
 
-  updateProgramStats(programs: Record<string, number>, title?: string) {
+  updateProgramStats(programs: Record<string, number>, title?: string, programNames?: Record<string, string>) {
     this.programStats.clear();
     let total = 0;
 
@@ -128,8 +128,9 @@ export class HUD {
 
     for (const [program, count] of sorted) {
       const percent = total > 0 ? (count / total) * 100 : 0;
-      const color = programColors.get(program) || 0xffffff;
+      const color = programColors.get(program) || hashColor(program);
       const hexColor = colorToHex(color);
+      const displayName = programNames?.[program] || program.slice(0, 8) + '...';
 
       const item = document.createElement('div');
       item.className = 'leaderboard-item';
@@ -137,7 +138,7 @@ export class HUD {
       item.innerHTML = `
         <div class="leaderboard-name">
           <span class="color-dot" style="background-color: ${hexColor};"></span>
-          ${this.formatProgramName(program)}
+          ${displayName}
         </div>
         <div class="leaderboard-value">${percent.toFixed(1)}%</div>
         <div class="leaderboard-bar">
@@ -639,11 +640,6 @@ export class HUD {
     return num.toFixed(2);
   }
 
-  private formatProgramName(program: string): string {
-    // programNames values are used as shortened IDs by the server,
-    // so the program string IS already the human-readable name
-    return program;
-  }
 
   /**
    * Update HUD with rich block data from block:update stream
