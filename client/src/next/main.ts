@@ -127,8 +127,12 @@ function setFilter(m: Mode) {
 }
 document.getElementById('filter')!.addEventListener('click', () => setFilter(MODES[(MODES.indexOf(mode) + 1) % MODES.length]));
 
-let auto = false;
-let autoAt = 0;
+// ?auto (45s) or ?auto=20 (seconds per preset) starts auto-cycling
+const autoParam = new URLSearchParams(location.search).get('auto');
+let auto = autoParam !== null && autoParam !== '0';
+const autoMs = Math.max(5, parseFloat(autoParam ?? '') || 45) * 1000;
+let autoAt = performance.now();
+document.getElementById('auto')!.classList.toggle('on', auto);
 addEventListener('keydown', (e) => {
   const n = parseInt(e.key, 10);
   if (n >= 1 && n <= presets.length) use(n - 1);
@@ -198,7 +202,7 @@ function loop(now: number) {
     hud.kpis(active.kpis(stats));
   }
   hud.tick(real);
-  if (auto && now - autoAt > 45_000) {
+  if (auto && now - autoAt > autoMs) {
     autoAt = now;
     use(presets.indexOf(active) + 1);
   }
