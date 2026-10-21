@@ -158,7 +158,10 @@ addEventListener('resize', resize);
 
 const frame: Frame = { t: 0, dt: 0, pdt: 0, playhead: 0, frac: 0, timeline, pointer, portrait: false };
 resize();
-use(Math.max(0, presets.findIndex((p) => p.id === new URLSearchParams(location.search).get('p'))));
+// ?p=city or ?p=4 (1-based, matching the number keys)
+const want = new URLSearchParams(location.search).get('p') ?? '';
+const wantN = parseInt(want, 10);
+use(wantN >= 1 && wantN <= presets.length ? wantN - 1 : Math.max(0, presets.findIndex((p) => p.id === want)));
 setFilter(mode);
 
 let last = performance.now();
