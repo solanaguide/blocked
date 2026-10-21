@@ -2,1045 +2,169 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Solana Blocks Live — Real-time 3D Blockchain Visualizer</title>
-  <meta name="description" content="Watch Solana blocks build in real-time. Every trade, every transaction, visualized in 3D.">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title>Solana Live</title>
+  <meta name="description" content="The Solana network, live: every block, every trade, as it happens.">
 
   <!-- Open Graph -->
   <meta property="og:type" content="website">
-  <meta property="og:title" content="Solana Blocks Live">
-  <meta property="og:description" content="Watch Solana blocks build in real-time. Every trade, every transaction, visualized in 3D.">
+  <meta property="og:title" content="Solana Live">
+  <meta property="og:description" content="The Solana network, live: every block, every trade, as it happens.">
   <meta property="og:image" content="https://solanacompass.com/images/3d-blocks-preview.webp">
   <meta property="og:url" content="https://live.solanacompass.com">
 
   <!-- Twitter / X -->
   <meta name="twitter:card" content="summary_large_image">
-  <meta name="twitter:title" content="Solana Blocks Live">
-  <meta name="twitter:description" content="Watch Solana blocks build in real-time. Every trade, every transaction, visualized in 3D.">
+  <meta name="twitter:title" content="Solana Live">
+  <meta name="twitter:description" content="The Solana network, live: every block, every trade, as it happens.">
   <meta name="twitter:image" content="https://solanacompass.com/images/3d-blocks-preview.webp">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700;900&family=Share+Tech+Mono&family=VT323&display=swap" rel="stylesheet">
   <style>
-    * {
-      margin: 0;
-      padding: 0;
-      box-sizing: border-box;
-    }
-
-    body {
-      font-family: 'Courier New', monospace;
-      overflow: hidden;
-      background: #000;
-      color: #fff;
-    }
-
-    #canvas-container {
-      position: fixed;
-      top: 0;
-      left: 0;
-      width: 100%;
-      height: 100%;
-      z-index: 1;
-    }
-
-    #hud {
-      position: fixed;
-      top: 0;
-      left: 0;
-      width: 100%;
-      height: 100%;
-      pointer-events: none;
-      z-index: 10;
-    }
-
-    /* Top Bar */
-    .top-bar {
-      position: absolute;
-      top: 0;
-      left: 0;
-      right: 0;
-      height: 60px;
-      background: linear-gradient(180deg, rgba(0,0,0,0.8) 0%, rgba(0,0,0,0) 100%);
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      padding: 0 30px;
-      font-size: 14px;
-      text-transform: uppercase;
-      letter-spacing: 2px;
-      pointer-events: auto;
-    }
-
-    .top-bar .title {
-      font-size: 24px;
-      font-weight: bold;
-      display: flex;
-      align-items: center;
-      gap: 4px;
-    }
-
-    .top-bar .title-icon {
-      font-size: 20px;
-    }
-
-    .top-bar .title-text {
-      background: linear-gradient(90deg, #ff006e, #8b5cf6, #06ffa5);
-      -webkit-background-clip: text;
-      -webkit-text-fill-color: transparent;
-    }
-
-    .top-bar .stats {
-      display: flex;
-      gap: 30px;
-    }
-
-    .top-bar .stat {
-      display: flex;
-      flex-direction: column;
-      align-items: flex-end;
-    }
-
-    .top-bar .stat-label {
-      font-size: 10px;
-      color: #8b5cf6;
-      margin-bottom: 2px;
-    }
-
-    .top-bar .stat-value {
-      font-size: 16px;
-      color: #06ffa5;
-      font-weight: bold;
-    }
-
-    /* Left Panel */
-    .left-panel {
-      position: absolute;
-      left: 20px;
-      top: 80px;
-      width: 280px;
-      max-height: calc(100vh - 100px);
-      background: rgba(0, 0, 0, 0.6);
-      backdrop-filter: blur(10px);
-      border: 1px solid rgba(139, 92, 246, 0.3);
-      border-radius: 10px;
-      padding: 20px;
-      box-shadow: 0 0 30px rgba(139, 92, 246, 0.2);
-      overflow-y: auto;
-      pointer-events: auto;
-      -webkit-overflow-scrolling: touch;
-    }
-
-    .panel-title {
-      font-size: 12px;
-      color: #8b5cf6;
-      margin-bottom: 15px;
-      text-transform: uppercase;
-      letter-spacing: 1px;
-    }
-
-    .stat-row {
-      display: flex;
-      justify-content: space-between;
-      margin-bottom: 10px;
-      font-size: 12px;
-    }
-
-    .stat-row .label {
-      color: #999;
-    }
-
-    .stat-row .value {
-      color: #06ffa5;
-      font-weight: bold;
-    }
-
-    .stat-row .value.truncate {
-      max-width: 100px;
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
-    }
-
-    .panel-section {
-      margin-bottom: 15px;
-      padding-bottom: 10px;
-      border-bottom: 1px solid rgba(139, 92, 246, 0.2);
-    }
-
-    .panel-section:last-of-type {
-      border-bottom: none;
-    }
-
-    .block-progress {
-      margin-top: 15px;
-    }
-
-    .progress-bar {
-      width: 100%;
-      height: 6px;
-      background: rgba(139, 92, 246, 0.2);
-      border-radius: 3px;
-      overflow: hidden;
-      margin-top: 5px;
-    }
-
-    .progress-fill {
-      height: 100%;
-      background: linear-gradient(90deg, #ff006e, #8b5cf6, #06ffa5);
-      transition: width 0.05s linear;
-      box-shadow: 0 0 10px rgba(139, 92, 246, 0.8);
-    }
-
-    /* Right Panel */
-    .right-panel {
-      position: absolute;
-      right: 20px;
-      top: 80px;
-      width: 320px;
-      max-height: calc(100vh - 200px);
-      overflow-y: auto;
-      background: rgba(0, 0, 0, 0.6);
-      backdrop-filter: blur(10px);
-      border: 1px solid rgba(139, 92, 246, 0.3);
-      border-radius: 10px;
-      padding: 20px;
-      box-shadow: 0 0 30px rgba(139, 92, 246, 0.2);
-      pointer-events: auto;
-      -webkit-overflow-scrolling: touch;
-    }
-
-    .leaderboard {
-      margin-bottom: 20px;
-    }
-
-    .leaderboard-item {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      padding: 8px 0;
-      border-bottom: 1px solid rgba(139, 92, 246, 0.1);
-      font-size: 11px;
-    }
-
-    .leaderboard-item:last-child {
-      border-bottom: none;
-    }
-
-    .leaderboard-name {
-      color: #fff;
-      flex: 1;
-      display: flex;
-      align-items: center;
-      gap: 8px;
-    }
-
-    .color-dot {
-      width: 8px;
-      height: 8px;
-      border-radius: 50%;
-      display: inline-block;
-      box-shadow: 0 0 6px currentColor;
-    }
-
-    .leaderboard-value {
-      color: #06ffa5;
-      font-weight: bold;
-    }
-
-    .leaderboard-bar {
-      height: 4px;
-      background: rgba(255, 255, 255, 0.1);
-      border-radius: 2px;
-      margin-top: 4px;
-      position: relative;
-    }
-
-    .leaderboard-bar-fill {
-      height: 100%;
-      border-radius: 2px;
-      box-shadow: 0 0 10px currentColor;
-      opacity: 0.8;
-    }
-
-    /* Bottom Panel */
-    .bottom-panel {
-      position: absolute;
-      bottom: 20px;
-      left: 50%;
-      transform: translateX(-50%);
-      width: 900px;
-      height: 150px;
-      background: rgba(0, 0, 0, 0.6);
-      backdrop-filter: blur(10px);
-      border: 1px solid rgba(139, 92, 246, 0.3);
-      border-radius: 10px;
-      padding: 15px;
-      box-shadow: 0 0 30px rgba(139, 92, 246, 0.2);
-      display: flex;
-      gap: 15px;
-      pointer-events: auto;
-    }
-
-    .chart-container {
-      flex: 1;
-      position: relative;
-    }
-
-    .chart-title {
-      font-size: 10px;
-      color: #8b5cf6;
-      margin-bottom: 8px;
-      text-transform: uppercase;
-    }
-
-    /* Notifications */
-    .notifications {
-      position: absolute;
-      top: 80px;
-      left: 50%;
-      transform: translateX(-50%);
-      width: 400px;
-      pointer-events: none;
-    }
-
-    .notification {
-      background: rgba(139, 92, 246, 0.9);
-      backdrop-filter: blur(10px);
-      border: 1px solid #8b5cf6;
-      border-radius: 8px;
-      padding: 15px 20px;
-      margin-bottom: 10px;
-      box-shadow: 0 0 30px rgba(139, 92, 246, 0.6);
-      animation: slideIn 0.3s ease-out;
-      font-size: 12px;
-    }
-
-    @keyframes slideIn {
-      from {
-        opacity: 0;
-        transform: translateY(-20px);
-      }
-      to {
-        opacity: 1;
-        transform: translateY(0);
-      }
-    }
-
-    /* Controls Help */
-    .controls {
-      position: absolute;
-      bottom: 20px;
-      left: 20px;
-      font-size: 10px;
-      color: #666;
-      line-height: 1.6;
-    }
-
-    .controls kbd {
-      background: rgba(139, 92, 246, 0.2);
-      padding: 2px 6px;
-      border-radius: 3px;
-      border: 1px solid rgba(139, 92, 246, 0.3);
-      color: #8b5cf6;
-    }
-
-    /* Scrollbar */
-    .right-panel::-webkit-scrollbar {
-      width: 6px;
-    }
-
-    .right-panel::-webkit-scrollbar-track {
-      background: rgba(139, 92, 246, 0.1);
-    }
-
-    .right-panel::-webkit-scrollbar-thumb {
-      background: rgba(139, 92, 246, 0.5);
-      border-radius: 3px;
-    }
-
-    /* Block Log */
-    .block-log-container {
-      margin-top: 20px;
-    }
-
-    .block-log-header {
-      font-family: 'Courier New', monospace;
-      font-size: 10px;
-      color: #8b5cf6;
-      padding: 4px 8px;
-      font-weight: bold;
-    }
-
-    .block-log {
-      font-family: 'Courier New', monospace;
-      font-size: 10px;
-      line-height: 1.4;
-      color: #06ffa5;
-      max-height: 300px;
-      overflow-y: auto;
-      background: rgba(0, 0, 0, 0.4);
-      padding: 8px;
-      border-radius: 4px;
-    }
-
-    .block-log-entry {
-      white-space: nowrap;
-      margin-bottom: 2px;
-      opacity: 0.8;
-    }
-
-    .block-log-entry:first-child {
-      opacity: 1;
-      color: #fff;
-    }
-
-    .block-log::-webkit-scrollbar {
-      width: 4px;
-    }
-
-    .block-log::-webkit-scrollbar-track {
-      background: rgba(139, 92, 246, 0.1);
-    }
-
-    .block-log::-webkit-scrollbar-thumb {
-      background: rgba(139, 92, 246, 0.5);
-      border-radius: 2px;
-    }
-
-    .left-panel::-webkit-scrollbar {
-      width: 6px;
-    }
-
-    .left-panel::-webkit-scrollbar-track {
-      background: rgba(139, 92, 246, 0.1);
-    }
-
-    .left-panel::-webkit-scrollbar-thumb {
-      background: rgba(139, 92, 246, 0.5);
-      border-radius: 3px;
-    }
-
-    /* Collapsed Panel Tabs */
-    .panel-tab {
-      position: fixed;
-      background: rgba(0, 0, 0, 0.8);
-      border: 1px solid rgba(139, 92, 246, 0.4);
-      cursor: pointer;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      pointer-events: auto;
-      transition: background 0.2s ease, box-shadow 0.2s ease;
-      z-index: 15;
-      display: none;
-    }
-
-    .panel-tab:hover {
-      background: rgba(139, 92, 246, 0.3);
-      box-shadow: 0 0 15px rgba(139, 92, 246, 0.5);
-    }
-
-    .panel-tab-left {
-      left: 0;
-      top: 50%;
-      transform: translateY(-50%);
-      width: 40px;
-      height: 120px;
-      border-radius: 0 8px 8px 0;
-      border-left: none;
-      flex-direction: column;
-      gap: 8px;
-    }
-
-    .panel-tab-right {
-      right: 0;
-      top: 50%;
-      transform: translateY(-50%);
-      width: 40px;
-      height: 120px;
-      border-radius: 8px 0 0 8px;
-      border-right: none;
-      flex-direction: column;
-      gap: 8px;
-    }
-
-    .panel-tab-bottom {
-      bottom: 0;
-      left: 50%;
-      transform: translateX(-50%);
-      width: 120px;
-      height: 40px;
-      border-radius: 8px 8px 0 0;
-      border-bottom: none;
-      gap: 8px;
-      z-index: 90;
-    }
-
-    .panel-tab-icon {
-      font-size: 16px;
-    }
-
-    .panel-tab-label {
-      font-size: 10px;
-      color: #8b5cf6;
-      text-transform: uppercase;
-      letter-spacing: 1px;
-    }
-
-    .panel-tab-left .panel-tab-label,
-    .panel-tab-right .panel-tab-label {
-      writing-mode: vertical-rl;
-      text-orientation: mixed;
-    }
-
-    /* Panel collapse transitions */
-    .left-panel,
-    .right-panel,
-    .bottom-panel {
-      transition: transform 0.3s ease-out, opacity 0.3s ease-out;
-    }
-
-    .left-panel.collapsed {
-      transform: translateX(-100%);
-      opacity: 0;
-      pointer-events: none;
-    }
-
-    .right-panel.collapsed {
-      transform: translateX(100%);
-      opacity: 0;
-      pointer-events: none;
-    }
-
-    .bottom-panel.collapsed {
-      transform: translate(-50%, 100%);
-      opacity: 0;
-      pointer-events: none;
-    }
-
-    /* Mobile Bottom Sheet */
-    .bottom-sheet {
-      position: fixed;
-      bottom: 0;
-      left: 0;
-      right: 0;
-      height: 90vh;
-      background: rgba(0, 0, 0, 0.95);
-      backdrop-filter: blur(15px);
-      border-top: 1px solid rgba(139, 92, 246, 0.4);
-      border-radius: 20px 20px 0 0;
-      z-index: 100;
-      transform: translateY(100%);
-      transition: transform 0.3s ease-out;
-      pointer-events: auto;
-      overflow: hidden;
-      display: none;
-    }
-
-    .bottom-sheet.visible {
-      transform: translateY(0); /* Full - shows 90vh */
-    }
-
-    .bottom-sheet.peek {
-      transform: translateY(calc(90vh - 150px)); /* Peek - shows ~150px */
-    }
-
-    .bottom-sheet.half {
-      transform: translateY(45vh); /* Half - shows 45vh (50% of screen) */
-    }
-
-    .bottom-sheet-handle {
-      width: 40px;
-      height: 4px;
-      background: rgba(139, 92, 246, 0.5);
-      border-radius: 2px;
-      margin: 12px auto;
-    }
-
-    .bottom-sheet-tabs {
-      display: flex;
-      border-bottom: 1px solid rgba(139, 92, 246, 0.2);
-      padding: 0 20px;
-    }
-
-    .bottom-sheet-tab {
-      padding: 12px 20px;
-      font-size: 12px;
-      color: #666;
-      text-transform: uppercase;
-      letter-spacing: 1px;
-      border: none;
-      background: none;
-      cursor: pointer;
-      border-bottom: 2px solid transparent;
-      transition: color 0.2s, border-color 0.2s;
-    }
-
-    .bottom-sheet-tab.active {
-      color: #8b5cf6;
-      border-bottom-color: #8b5cf6;
-    }
-
-    .bottom-sheet-content {
-      padding: 20px;
-      overflow-y: auto;
-      max-height: calc(90vh - 80px);
-      -webkit-overflow-scrolling: touch;
-    }
-
-    .bottom-sheet-panel {
-      display: none;
-    }
-
-    .bottom-sheet-panel.active {
-      display: block;
-    }
-
-    /* Controls help */
-    .controls {
-      pointer-events: auto;
-    }
-
-    /* Responsive Breakpoints */
-
-    /* Tablet: 768px - 1024px */
-    @media (max-width: 1024px) {
-      .left-panel,
-      .right-panel {
-        display: none;
-      }
-
-      .panel-tab-left,
-      .panel-tab-right {
-        display: flex;
-      }
-
-      .left-panel.expanded,
-      .right-panel.expanded {
-        display: block;
-      }
-
-      .bottom-panel {
-        width: calc(100% - 100px);
-        left: 50px;
-        transform: none;
-      }
-
-      .top-bar .stat:nth-child(2),
-      .top-bar .stat:nth-child(6),
-      .top-bar .stat:nth-child(7) {
-        display: none;
-      }
-
-      .controls {
-        display: none;
-      }
-    }
-
-    /* Mobile: < 768px */
-    @media (max-width: 768px) {
-      .top-bar {
-        height: 50px;
-        padding: 0 15px;
-      }
-
-      .top-bar .title {
-        font-size: 16px;
-      }
-
-      .top-bar .title-icon {
-        font-size: 14px;
-      }
-
-      .top-bar .stats {
-        gap: 15px;
-      }
-
-      /* Hide: Revenue(2), Complete(4), SPS(6), Mode(7) - Keep: Volume(1), TPS(3), Slot(5) */
-      .top-bar .stat:nth-child(2),
-      .top-bar .stat:nth-child(4),
-      .top-bar .stat:nth-child(6),
-      .top-bar .stat:nth-child(7) {
-        display: none;
-      }
-
-      .top-bar .stat:nth-child(3) {
-        display: flex;
-      }
-
-      .top-bar .stat-label {
-        font-size: 9px;
-      }
-
-      .top-bar .stat-value {
-        font-size: 12px;
-      }
-
-      .left-panel,
-      .right-panel,
-      .bottom-panel {
-        display: none;
-      }
-
-      .panel-tab-left,
-      .panel-tab-right,
-      .panel-tab-bottom {
-        display: flex;
-      }
-
-      .bottom-sheet {
-        display: block;
-      }
-
-      .controls {
-        display: none;
-      }
-    }
-
-    /* Small Mobile: < 480px */
-    @media (max-width: 480px) {
-      .top-bar .title {
-        font-size: 14px;
-      }
-
-      .top-bar .title-icon {
-        font-size: 12px;
-      }
-
-      .top-bar .stats {
-        gap: 10px;
-      }
-
-      /* Show Volume(1), TPS(3), Slot(5) */
-      .top-bar .stat:nth-child(2),
-      .top-bar .stat:nth-child(4),
-      .top-bar .stat:nth-child(6),
-      .top-bar .stat:nth-child(7) {
-        display: none;
-      }
-
-      .top-bar .stat:nth-child(1),
-      .top-bar .stat:nth-child(3),
-      .top-bar .stat:nth-child(5) {
-        display: flex;
-      }
-
-      .panel-tab-left,
-      .panel-tab-right {
-        height: 100px;
-        width: 35px;
-      }
-
-      .panel-tab-bottom {
-        width: 100px;
-        height: 35px;
-      }
+    :root {
+      --cyan: #22e6ff; --magenta: #ff2bd6; --gold: #ffc23d; --violet: #b9a6ff; --hot: #ff3b6b;
+      --accent: var(--magenta); --head: var(--cyan); --dim: var(--violet);
+      --font: 'Share Tech Mono', ui-monospace, monospace;
+    }
+    /* WarGames: green phosphor terminal */
+    body[data-preset="validators"] { --accent: #ffb000; --head: #39ff7a; --dim: #1f9a4a; --gold: #ffb000; --font: 'VT323', 'Share Tech Mono', monospace; }
+    body[data-preset="validators"] .hud { font-size: 1.15em; }
+    /* Tron: cyan and orange */
+    body[data-preset="spectrum"] { --accent: #ff7a18; --head: #18e8ff; --dim: #4fa9b8; --gold: #ff7a18; }
+
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body { height: 100%; background: #06010f; overflow: hidden; color: #fff; font-family: var(--font); }
+    #stage, #stage canvas { position: fixed; inset: 0; width: 100%; height: 100%; display: block; }
+
+    .hud { position: fixed; pointer-events: none; letter-spacing: 0.08em; font-family: var(--font); }
+    .hud a, .hud button { pointer-events: auto; }
+    .label { font-size: 11px; color: var(--dim); text-transform: uppercase; letter-spacing: 0.2em; }
+
+    #brand { top: max(18px, env(safe-area-inset-top)); left: 22px; }
+    #brand .title { font-family: Orbitron, sans-serif; font-weight: 900; font-size: 15px; letter-spacing: 0.35em; color: #fff; }
+    #brand .title em { font-style: normal; color: var(--accent); }
+    #brand .slot { font-family: Orbitron, sans-serif; font-weight: 500; font-size: 26px; color: var(--head); margin-top: 6px; font-variant-numeric: tabular-nums; text-shadow: 0 0 10px currentColor; }
+    #brand .meta { font-size: 12px; color: var(--dim); margin-top: 2px; }
+    #brand .meta b { color: #fff; font-weight: normal; }
+
+    #status { top: max(18px, env(safe-area-inset-top)); right: 22px; text-align: right; font-size: 12px; color: var(--dim); }
+    #link { color: var(--head); }
+    #link::before { content: '●'; margin-right: 6px; animation: blink 1.2s steps(2) infinite; }
+    #link.down { color: var(--hot); }
+    #delay { display: block; margin-top: 4px; }
+    #status a { display: inline-block; margin-top: 10px; color: var(--gold); text-decoration: none; border: 1px solid currentColor; padding: 4px 8px; opacity: 0.85; }
+    #status a:hover { opacity: 1; }
+    @keyframes blink { 50% { opacity: 0.2; } }
+    #filter { display: block; margin: 8px 0 0 auto; background: none; border: 1px solid var(--dim); color: var(--dim); font: inherit; font-size: 11px; letter-spacing: 0.12em; padding: 4px 8px; cursor: pointer; }
+    #filter::before { content: '◇ '; }
+    body:not([data-filter="all"]) #filter { color: #fff; border-color: #fff; background: rgba(255, 255, 255, 0.08); }
+    body:not([data-filter="all"]) #filter::before { content: '◆ '; }
+
+    #switcher { top: max(18px, env(safe-area-inset-top)); left: 50%; transform: translateX(-50%); text-align: center; }
+    #switcher .row { display: flex; align-items: center; gap: 12px; }
+    #switcher button { background: none; border: 1px solid var(--dim); color: var(--head); font: inherit; width: 26px; height: 22px; cursor: pointer; opacity: 0.7; }
+    #switcher button:hover { opacity: 1; }
+    #preset-name { font-family: Orbitron, sans-serif; font-weight: 700; font-size: 13px; letter-spacing: 0.35em; color: #fff; min-width: 150px; }
+    #preset-dots { font-size: 9px; color: var(--dim); margin-top: 4px; letter-spacing: 0.3em; }
+    #auto { display: none; font-size: 9px; color: var(--accent); margin-top: 2px; }
+    #auto.on { display: block; }
+
+    #kpis { left: 50%; transform: translateX(-50%); bottom: max(22px, env(safe-area-inset-bottom)); display: flex; gap: 34px; }
+    .kpi { text-align: center; min-width: 120px; }
+    .kpi .v { font-family: Orbitron, sans-serif; font-weight: 700; font-size: 30px; font-variant-numeric: tabular-nums; text-shadow: 0 0 12px currentColor; }
+    .kpi .label { margin-top: 2px; }
+
+    #feed { left: 22px; top: calc(max(18px, env(safe-area-inset-top)) + 96px); font-size: 13px; display: flex; flex-direction: column; gap: 4px; }
+    #feed .row { display: flex; gap: 10px; animation: in 0.5s ease-out; opacity: 0.95; white-space: nowrap; }
+    #feed .row:nth-child(n+2) { opacity: 0.6; }
+    #feed .row:nth-child(n+4) { opacity: 0.35; }
+    #feed b { color: var(--gold); font-weight: normal; min-width: 64px; }
+    #feed span { color: #fff; }
+    #feed i { color: var(--dim); font-style: normal; }
+    #feed em { font-style: normal; }
+    #feed.windows .row { gap: 8px; }
+    #feed.windows span { color: var(--head); min-width: 92px; }
+    #feed.windows em.ok { color: var(--head); letter-spacing: -0.1em; }
+    #feed.windows em.skip { color: #ff3a3a; }
+    #feed.windows b { min-width: 40px; text-align: right; }
+    @keyframes in { from { transform: translateX(-12px); opacity: 0; } }
+
+    #legend { right: 22px; bottom: max(22px, env(safe-area-inset-bottom)); font-size: 11px; color: var(--dim); line-height: 1.75; text-align: right; }
+    #legend i { display: inline-block; width: 8px; height: 8px; margin-left: 7px; vertical-align: 0; }
+
+    /* Annotation layer: thin leader lines to small bracketed labels */
+    #overlay { position: fixed; inset: 0; pointer-events: none; overflow: hidden; }
+    #overlay svg { position: absolute; inset: 0; width: 100%; height: 100%; }
+    #overlay polyline { fill: none; stroke: rgba(255, 190, 130, 0.65); stroke-width: 1; }
+    .callout { position: absolute; left: 0; top: 0; font-family: 'Share Tech Mono', monospace; font-size: 11px; line-height: 1.35;
+      padding: 4px 7px; border-left: 2px solid #ffa24a; background: rgba(4, 7, 13, 0.72); color: #d7e3f4; white-space: nowrap; }
+    .callout b { display: block; font-family: Orbitron, sans-serif; font-weight: 700; font-size: 13px; color: #fff; letter-spacing: 0.06em; }
+    .callout span { display: block; color: #ffa24a; font-size: 15px; }
+    .callout i { font-style: normal; color: #8ea3bf; }
+    .callout.tower { border-left-color: #cfe4ff; }
+    .callout em { display: block; font-style: normal; color: #ff6a8a; font-size: 10px; letter-spacing: 0.1em; }
+    .callout.tower b { font-size: 11px; }
+    #hero { position: fixed; left: 0; right: 0; top: 40%; text-align: center; pointer-events: none; opacity: 0;
+      font-family: Orbitron, sans-serif; font-weight: 900; font-size: clamp(36px, 8vw, 120px); letter-spacing: 0.02em; color: #fff;
+      text-shadow: 0 0 30px rgba(255, 162, 74, 0.6); }
+    #hero.slam { animation: slam 2.4s cubic-bezier(.2,.8,.2,1) forwards; }
+    @keyframes slam {
+      0% { opacity: 0; transform: scale(1.6); filter: blur(12px); }
+      12% { opacity: 1; transform: scale(1); filter: blur(0); }
+      70% { opacity: 1; transform: scale(0.97); }
+      100% { opacity: 0; transform: scale(0.94) translateY(-30px); }
+    }
+    body[data-preset="city"] { --accent: #ffa24a; --head: #cfe4ff; --dim: #8ea3bf; --gold: #ffa24a; }
+
+    @media (max-width: 900px) {
+      #kpis { gap: 14px; bottom: max(14px, env(safe-area-inset-bottom)); width: calc(100% - 32px); justify-content: space-between; }
+      .kpi { min-width: 0; }
+      .kpi .v { font-size: 18px; }
+      .kpi .label { font-size: 9px; letter-spacing: 0.1em; }
+      #feed { top: calc(max(18px, env(safe-area-inset-top)) + 82px); left: 16px; font-size: 11px; }
+      #legend { display: none; }
+      #brand { left: 16px; } #status { right: 16px; }
+      #brand .slot { font-size: 20px; }
+      #brand .meta { font-size: 10px; }
+      #status a { font-size: 10px; padding: 3px 6px; margin-top: 6px; }
+      #status { font-size: 10px; }
+      #switcher { top: auto; bottom: calc(max(14px, env(safe-area-inset-bottom)) + 52px); }
+      #preset-name { font-size: 11px; min-width: 120px; }
     }
   </style>
 </head>
 <body>
-  <div id="canvas-container"></div>
+  <div id="stage"></div>
 
-  <div id="hud">
-    <!-- Top KPI Bar -->
-    <div class="top-bar">
-      <div class="title"><span class="title-icon">🧭</span> <span class="title-text">LIVE</span></div>
-      <div class="stats">
-        <div class="stat">
-          <div class="stat-label">Volume</div>
-          <div class="stat-value" id="kpi-volume" style="color: #00CED1;">$0</div>
-        </div>
-        <div class="stat">
-          <div class="stat-label">Revenue</div>
-          <div class="stat-value" id="kpi-revenue" style="color: #FFD700;">0 SOL</div>
-        </div>
-        <div class="stat">
-          <div class="stat-label">TPS</div>
-          <div class="stat-value" id="kpi-tps">0</div>
-        </div>
-        <div class="stat">
-          <div class="stat-label">Complete</div>
-          <div class="stat-value" id="kpi-complete">0%</div>
-        </div>
-        <div class="stat">
-          <div class="stat-label">Slot</div>
-          <div class="stat-value" id="current-slot">-</div>
-        </div>
-        <div class="stat">
-          <div class="stat-label">SPS</div>
-          <div class="stat-value" id="sps">0</div>
-        </div>
-        <div class="stat">
-          <div class="stat-label">Mode</div>
-          <div class="stat-value" id="mode">VOLUME</div>
-        </div>
-      </div>
-    </div>
-
-    <!-- Left Panel -->
-    <div class="left-panel">
-      <!-- Block Info Section -->
-      <div class="panel-section">
-        <div class="panel-title">Block Info</div>
-        <div class="stat-row">
-          <span class="label">Slot</span>
-          <span class="value" id="block-slot">-</span>
-        </div>
-        <div class="stat-row">
-          <span class="label">Leader</span>
-          <span class="value truncate" id="block-leader" title="">-</span>
-        </div>
-        <div class="stat-row">
-          <span class="label">Epoch</span>
-          <span class="value" id="block-epoch">-</span>
-        </div>
-      </div>
-
-      <!-- Transactions Section -->
-      <div class="panel-section">
-        <div class="panel-title">Transactions</div>
-        <div class="stat-row">
-          <span class="label">Total</span>
-          <span class="value" id="block-txns">0</span>
-        </div>
-        <div class="stat-row">
-          <span class="label">Votes</span>
-          <span class="value" id="block-votes" style="color: #FFD700;">0</span>
-        </div>
-        <div class="stat-row">
-          <span class="label">Completed</span>
-          <span class="value" id="block-completed" style="color: #00CED1;">0</span>
-        </div>
-        <div class="stat-row">
-          <span class="label">Reverted</span>
-          <span class="value" id="block-reverted" style="color: #FFA500;">0</span>
-        </div>
-      </div>
-
-      <!-- Compute Units Section -->
-      <div class="panel-section">
-        <div class="panel-title">Compute Units</div>
-        <div class="stat-row">
-          <span class="label">Total CU</span>
-          <span class="value" id="block-cu">0</span>
-        </div>
-        <div class="stat-row">
-          <span class="label">Completed CU</span>
-          <span class="value" id="block-completed-cu" style="color: #00CED1;">0</span>
-        </div>
-        <div class="stat-row">
-          <span class="label">Reverted CU</span>
-          <span class="value" id="block-reverted-cu" style="color: #FFA500;">0</span>
-        </div>
-        <div class="stat-row">
-          <span class="label">Avg CU/tx</span>
-          <span class="value" id="block-avg-cu">0</span>
-        </div>
-      </div>
-
-      <!-- Fees Section -->
-      <div class="panel-section">
-        <div class="panel-title">Fees</div>
-        <div class="stat-row">
-          <span class="label">Total Fees</span>
-          <span class="value" id="block-fees">0 SOL</span>
-        </div>
-        <div class="stat-row">
-          <span class="label">Priority</span>
-          <span class="value" id="block-priority-fees">0 SOL</span>
-        </div>
-        <div class="stat-row">
-          <span class="label">Rewards</span>
-          <span class="value" id="block-rewards">0 SOL</span>
-        </div>
-        <div class="stat-row">
-          <span class="label">Avg Fee</span>
-          <span class="value" id="block-avg-fee">0</span>
-        </div>
-      </div>
-
-      <!-- MEV/Jito Section -->
-      <div class="panel-section">
-        <div class="panel-title">MEV / Jito</div>
-        <div class="stat-row">
-          <span class="label">Jito Txns</span>
-          <span class="value" id="block-jito-txns" style="color: #FF8C00;">0</span>
-        </div>
-        <div class="stat-row">
-          <span class="label">Total Tips</span>
-          <span class="value" id="block-jito-total" style="color: #FF8C00;">0 SOL</span>
-        </div>
-        <div class="stat-row">
-          <span class="label">Avg Tip</span>
-          <span class="value" id="block-jito-avg">0</span>
-        </div>
-        <div class="stat-row">
-          <span class="label">Max Priority</span>
-          <span class="value" id="block-priority-max">0</span>
-        </div>
-      </div>
-
-      <!-- Network Activity Section -->
-      <div class="panel-section">
-        <div class="panel-title">Network Activity</div>
-        <div class="stat-row">
-          <span class="label">Unique Accounts</span>
-          <span class="value" id="block-accounts">0</span>
-        </div>
-        <div class="stat-row">
-          <span class="label">Unique Programs</span>
-          <span class="value" id="block-programs">0</span>
-        </div>
-        <div class="stat-row">
-          <span class="label">Unique Signers</span>
-          <span class="value" id="block-signers">0</span>
-        </div>
-        <div class="stat-row">
-          <span class="label">Instructions</span>
-          <span class="value" id="block-instructions">0</span>
-        </div>
-        <div class="stat-row">
-          <span class="label">Avg CPI Depth</span>
-          <span class="value" id="block-cpi-depth">0</span>
-        </div>
-      </div>
-
-      <!-- Block Progress -->
-      <div class="panel-section">
-        <div class="panel-title">Block Progress</div>
-        <div class="progress-bar">
-          <div class="progress-fill" id="progress-fill" style="width: 0%"></div>
-        </div>
-      </div>
-
-      <!-- Block Log -->
-      <div class="block-log-container">
-        <div class="panel-title" style="margin-top: 10px; margin-bottom: 10px;">Block Log</div>
-        <div class="block-log-header">Slot      Txns   Rev  Vol</div>
-        <div id="block-log" class="block-log"></div>
-      </div>
-    </div>
-
-    <!-- Right Panel -->
-    <div class="right-panel">
-      <!-- Trading Activity Section -->
-      <div class="panel-section">
-        <div class="panel-title">Trading Activity</div>
-        <div class="stat-row">
-          <span class="label">Swap Txns</span>
-          <span class="value" id="block-swap-txns">0</span>
-        </div>
-        <div class="stat-row">
-          <span class="label">Swaps</span>
-          <span class="value" id="block-swap-count">0</span>
-        </div>
-        <div class="stat-row">
-          <span class="label">Volume</span>
-          <span class="value" id="block-volume" style="color: #00CED1;">$0</span>
-        </div>
-        <div class="stat-row">
-          <span class="label">Traders</span>
-          <span class="value" id="block-traders">0</span>
-        </div>
-        <div class="stat-row">
-          <span class="label">Pools</span>
-          <span class="value" id="block-pools">0</span>
-        </div>
-        <div class="stat-row">
-          <span class="label">Tokens</span>
-          <span class="value" id="block-tokens">0</span>
-        </div>
-      </div>
-
-      <!-- Transfers Section -->
-      <div class="panel-section">
-        <div class="panel-title">Transfers</div>
-        <div class="stat-row">
-          <span class="label">Transfer Txns</span>
-          <span class="value" id="block-transfer-txns">0</span>
-        </div>
-        <div class="stat-row">
-          <span class="label">Transfers</span>
-          <span class="value" id="block-transfer-count">0</span>
-        </div>
-        <div class="stat-row">
-          <span class="label">Volume</span>
-          <span class="value" id="block-transfer-volume" style="color: #00CED1;">$0</span>
-        </div>
-      </div>
-
-      <div class="leaderboard">
-        <div class="panel-title" id="programs-title">Top DEX (last block)</div>
-        <div id="programs-leaderboard"></div>
-      </div>
-      <div class="leaderboard">
-        <div class="panel-title" id="tokens-title">Top Tokens (last block)</div>
-        <div id="tokens-leaderboard"></div>
-      </div>
-    </div>
-
-    <!-- Bottom Panel -->
-    <div class="bottom-panel">
-      <div class="chart-container">
-        <div class="chart-title" id="volume-chart-title">Volume (60 blocks)</div>
-        <svg id="volume-chart" width="100%" height="100%"></svg>
-      </div>
-      <div class="chart-container">
-        <div class="chart-title" id="revenue-chart-title">Revenue (60 blocks)</div>
-        <svg id="sps-chart" width="100%" height="100%"></svg>
-      </div>
-    </div>
-
-    <!-- Notifications -->
-    <div class="notifications" id="notifications"></div>
-
-    <!-- Controls -->
-    <div class="controls">
-      <div><kbd>1-5</kbd> Particle Shape <kbd>G</kbd> Toggle Votes</div>
-      <div><kbd>F</kbd> Free Mode <kbd>P</kbd> Program <kbd>T</kbd> Token <kbd>V</kbd> Volume</div>
-      <div><kbd>+/-</kbd> Particle Size <kbd>L</kbd> Leaderboard <kbd>C</kbd> Chart Mode</div>
-      <div><kbd>[/]</kbd> Switch Scene <kbd>A</kbd> Auto-cycle</div>
-    </div>
-
-    <!-- Collapsed Panel Tabs -->
-    <div class="panel-tab panel-tab-left" id="left-panel-tab" data-panel="left">
-      <span class="panel-tab-icon">📊</span>
-      <span class="panel-tab-label">Stats</span>
-    </div>
-
-    <div class="panel-tab panel-tab-right" id="right-panel-tab" data-panel="right">
-      <span class="panel-tab-icon">💹</span>
-      <span class="panel-tab-label">Trading</span>
-    </div>
-
-    <div class="panel-tab panel-tab-bottom" id="bottom-panel-tab" data-panel="bottom">
-      <span class="panel-tab-icon">📈</span>
-      <span class="panel-tab-label">Charts</span>
-    </div>
-
-    <!-- Mobile Bottom Sheet -->
-    <div class="bottom-sheet" id="bottom-sheet">
-      <div class="bottom-sheet-handle"></div>
-      <div class="bottom-sheet-tabs">
-        <button class="bottom-sheet-tab active" data-tab="stats">Stats</button>
-        <button class="bottom-sheet-tab" data-tab="trading">Trading</button>
-        <button class="bottom-sheet-tab" data-tab="charts">Charts</button>
-        <button class="bottom-sheet-tab" data-tab="legend">Legend</button>
-      </div>
-      <div class="bottom-sheet-content">
-        <div class="bottom-sheet-panel active" id="sheet-stats">
-          <!-- Stats content will be populated by PanelManager -->
-        </div>
-        <div class="bottom-sheet-panel" id="sheet-trading">
-          <!-- Trading content will be populated by PanelManager -->
-        </div>
-        <div class="bottom-sheet-panel" id="sheet-charts">
-          <!-- Charts content will be populated by PanelManager -->
-        </div>
-        <div class="bottom-sheet-panel" id="sheet-legend">
-          <!-- Legend content will be populated by Legend.ts -->
-        </div>
-      </div>
-    </div>
+  <div class="hud" id="brand">
+    <div class="title">SOLANA<em>//</em>LIVE</div>
+    <div class="slot" id="slot">—</div>
+    <div class="meta">EPOCH <b id="epoch">—</b> · LEADER <b id="leader">—</b></div>
   </div>
+
+  <div class="hud" id="switcher">
+    <div class="row">
+      <button id="prev" aria-label="Previous preset">◂</button>
+      <div id="preset-name">—</div>
+      <button id="next" aria-label="Next preset">▸</button>
+    </div>
+    <div id="preset-dots"></div>
+    <div id="auto">AUTO-CYCLE</div>
+  </div>
+
+  <div class="hud" id="status">
+    <span id="link"><span id="link-text">CONNECTING</span></span>
+    <span id="delay">T−0.0s</span>
+    <a href="https://solanacompass.com/analytics" target="_blank" rel="noopener">FULL ANALYTICS ↗</a>
+    <button id="filter" title="Cycle trade filter · T tokenized · O organic"><span id="filter-state">ALL TOKENS</span></button>
+  </div>
+
+  <div class="hud" id="kpis"></div>
+  <div class="hud" id="feed"></div>
+  <div class="hud" id="legend"></div>
+  <div id="overlay"><svg></svg></div>
+  <div id="hero"></div>
 
   <a href="https://solanacompass.com" style="position:absolute;left:-9999px">Solana Compass</a>
 
@@ -1049,6 +173,6 @@
   <script async data-id="100961864" src="/ca35b5249987a8.js"></script>
   <noscript><p><img alt="Clicky" width="1" height="1" src="//in.getclicky.com/100961864ns.gif" /></p></noscript>
 
-  <script type="module" src="/src/main.ts"></script>
+  <script type="module" src="/src/next/main.ts"></script>
 </body>
 </html>

@@ -98,6 +98,7 @@ app.get('/api/network-state', (req, res) => {
     recentTrades: networkCache.recentTrades,
     lastBlockSlot: networkCache.lastBlockSlot,
     lastBlockTime: networkCache.lastBlockTime,
+    blockCuLimit: config.blockCuLimit,
   });
 });
 
@@ -182,6 +183,7 @@ interface AccumulatedTrade {
   vu: number;          // volume USD
   t: number;           // timestamp (ms)
   sig: string;         // full transaction signature (for redirect cache)
+  q: number;           // indexer trade quality: 0 organic/unknown, 1 bot-like, 2 wash
 }
 const tradesPerSlot: Map<number, AccumulatedTrade[]> = new Map();
 
@@ -197,6 +199,7 @@ function processRawTrade(raw: any): AccumulatedTrade {
     tb: raw.token_b.id,
     vu: volumeUsd,
     p: raw.program_id,
+    q: raw.is_wash_trade ? 2 : raw.trade_quality === 'bot_like' ? 1 : 0,
   };
 }
 
@@ -351,6 +354,7 @@ function buildWireTrades(trades: AccumulatedTrade[], blockTimeSec: number): {
     p: getProgramIndex(trade.p),
     vu: trade.vu,
     dt: trade.t - blockTimeMs,
+    ...(trade.q ? { q: trade.q } : {}),
   }));
 
   return { tokenDex, programDex, compactTrades };

@@ -139,6 +139,7 @@ export interface CompactTrade {
   p: number;    // index into programDex
   vu: number;   // volume USD
   dt: number;   // timestamp delta (ms offset from blockTime)
+  q?: number;   // indexer quality: omitted/0 organic, 1 bot-like, 2 wash
 }
 
 export interface WireBlockMessage extends BlockFields {
