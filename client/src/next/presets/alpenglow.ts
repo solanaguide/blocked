@@ -628,35 +628,45 @@ export class Alpenglow implements Preset {
     const g = cv.getContext('2d')!;
     g.setTransform(dpr, 0, 0, dpr, 0, 0);
     g.clearRect(0, 0, W, H);
-    const px = W < 700 ? 7 : 10, right = W - 70, base = H - 6;
+    const px = W < 700 ? 7 : 10, mid = Math.round(W / 2), base = H - 6;
     g.font = '10px "Share Tech Mono", monospace';
     g.textBaseline = 'alphabetic';
     let frontX = -1;
-    for (let s = Math.floor(playhead); s > playhead - right / px - 1; s--) {
-      const x = right - (playhead - s) * px;
-      if (x < 8) break;
-      const since = (playhead - s - 1) * this.slotMs;
-      const c = consensus(s);
-      const produced = this.present.get(s);
+    const first = Math.floor(playhead - mid / px) - 1, last = Math.ceil(playhead + (W - mid) / px) + 1;
+    for (let s = last; s >= first; s--) {
+      const x = mid + (s - playhead) * px;
+      if (x < 6 || x > W - 6) continue;
       const lead = s % 4 === 0;
       const h = lead ? 14 : 7;
-      let col = 'rgba(200,205,255,0.28)';
-      if (produced === false) col = 'rgba(120,40,60,0.9)';
-      else if (c?.finalized !== undefined && since >= c.finalized) { col = '#ffd6e0'; if (frontX < 0) frontX = x; }
-      else if (c?.notarized !== undefined && since >= c.notarized) col = '#ff7fae';
+      let col: string;
+      if (s > playhead) {
+        // Coming up: slots still to play
+        col = 'rgba(160,165,200,0.22)';
+      } else {
+        const since = (playhead - s - 1) * this.slotMs;
+        const c = consensus(s);
+        col = 'rgba(200,205,255,0.45)';
+        if (this.present.get(s) === false) col = 'rgba(150,40,70,0.95)';
+        else if (c?.finalized !== undefined && since >= c.finalized) { col = '#ffd6e0'; if (frontX < 0) frontX = x; }
+        else if (c?.notarized !== undefined && since >= c.notarized) col = '#ff7fae';
+      }
       g.fillStyle = col;
       g.fillRect(Math.round(x), base - h, lead ? 2 : 1.5, h);
       if (s % 25 === 0) {
-        g.fillStyle = 'rgba(210,214,255,0.55)';
+        g.fillStyle = s > playhead ? 'rgba(210,214,255,0.3)' : 'rgba(210,214,255,0.6)';
         g.fillText(fmtInt(s).slice(-7), Math.round(x) + 4, base - 6);
       }
     }
-    // Ends of the tape: the newest slot, and where finality has reached
-    g.fillStyle = 'rgba(210,214,255,0.7)';
-    g.fillText('NOW', right + 8, base - 2);
+    // NOW sits in the middle; FINAL marks how far finality has reached
+    g.fillStyle = 'rgba(255,255,255,0.85)';
+    g.fillRect(mid, base - 22, 1, 22);
+    g.font = '10px Orbitron, sans-serif';
+    g.fillText('NOW', mid + 5, base - 15);
     if (frontX > 0) {
       g.fillStyle = '#ffd6e0';
-      g.fillText('FINAL', frontX - 12, base - 17);
+      g.textAlign = 'right';
+      g.fillText('FINAL', frontX - 4, base - 15);
+      g.textAlign = 'left';
     }
   }
 
