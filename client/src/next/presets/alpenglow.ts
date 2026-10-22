@@ -640,6 +640,15 @@ export class Alpenglow implements Preset {
     }
   }
 
+  jumped() {
+    // Everything placed for the old playhead goes; the backfill rebuilds it
+    for (const r of this.ranges) { r.slot = -1; r.mesh.visible = false; }
+    for (const fl of this.flags) { fl.range = undefined; fl.group.visible = false; }
+    for (const sp of this.sparks) sp.age = 1;
+    this.callouts.clear();
+    this.prevAmp = this.prevProf = undefined;
+  }
+
   trade() { /* this view is about consensus, not markets */ }
 
   private z(slot: number) {

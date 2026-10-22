@@ -17,6 +17,8 @@ export class Timeline {
   private entered = 0;    // last slot we emitted
 
   onEnter: (slot: number, block: Block | undefined) => void = () => {};
+  onJump: () => void = () => {};
+  backfill = 64;            // slots replayed instantly after a jump
 
   push(b: Block) {
     this.blocks.set(b.slot, b);
@@ -45,9 +47,11 @@ export class Timeline {
 
     const behind = this.latest - this.lagSlots - this.playhead;
     if (behind > 60) {
-      // Tab was hidden or feed stalled: jump rather than fast-forward
+      // Tab was hidden or feed stalled: jump rather than fast-forward, then
+      // replay the recent slots instantly so scenes refill their history
       this.playhead = this.latest - this.lagSlots;
-      this.entered = Math.floor(this.playhead);
+      this.entered = Math.floor(this.playhead) - this.backfill;
+      this.onJump();
     }
     // Gentle proportional catch-up keeps the buffer near lagSlots
     const catchUp = Math.max(-0.6, Math.min(1.5, behind * 0.12));

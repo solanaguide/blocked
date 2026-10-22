@@ -57,6 +57,8 @@ export interface Preset {
   kpis(s: Stats): Kpi[];
   /** The trade filter changed: drop trade-derived history */
   reset?(): void;
+  /** Playback jumped (tab was hidden): drop anything tied to the old position */
+  jumped?(): void;
   activate?(): void;
   deactivate?(): void;
 }

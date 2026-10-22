@@ -98,6 +98,7 @@ function fire(t: Trade, slot: number) {
   }
 }
 
+timeline.onJump = () => { for (const p of presets) p.jumped?.(); pending = []; hud.clearFeed(); };
 connectFeed((b) => timeline.push(b), (up) => hud.status(up), recordConsensus);
 // Local dev: prod blocks plus consensus from the local relay (npm run dev:consensus)
 if (/^(localhost|127\.0\.0\.1)$/.test(location.hostname)) connectConsensus(`ws://${location.host}/consensus-ws`);
