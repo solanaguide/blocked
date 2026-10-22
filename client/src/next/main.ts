@@ -13,6 +13,7 @@ import { Validators } from './presets/validators';
 import { Spectrum } from './presets/spectrum';
 import { City } from './presets/city';
 import { Alpenglow } from './presets/alpenglow';
+import { Finality } from './presets/finality';
 import { recordConsensus, connectConsensus } from './consensus';
 
 const renderer = new THREE.WebGLRenderer({ antialias: false, powerPreference: 'high-performance' });
@@ -24,7 +25,7 @@ renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 document.getElementById('stage')!.appendChild(renderer.domElement);
 
-const presets: Preset[] = [new Highway(), new Validators(), new Spectrum(), new City(), new Alpenglow()];
+const presets: Preset[] = [new Highway(), new Validators(), new Spectrum(), new City(), new Alpenglow(), new Finality()];
 let active = presets[0];
 
 const post = new Post(renderer, active.scene, active.camera);
@@ -102,7 +103,7 @@ connectFeed((b) => timeline.push(b), (up) => hud.status(up), recordConsensus);
 // Local dev: prod blocks plus consensus from the local relay (npm run dev:consensus)
 if (/^(localhost|127\.0\.0\.1)$/.test(location.hostname)) connectConsensus(`ws://${location.host}/consensus-ws`);
 
-// --- Preset switching: keys 1-5, [ ], A for auto-cycle, ?p= deep link ---
+// --- Preset switching: keys 1-6, [ ], A for auto-cycle, ?p= deep link ---
 function use(i: number) {
   active.deactivate?.();
   active = presets[(i + presets.length) % presets.length];
