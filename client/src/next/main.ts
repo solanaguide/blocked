@@ -187,7 +187,13 @@ let last = performance.now();
 let lastPlayhead = 0;
 let lastKpi = 0;
 
+const MIN_FRAME_MS = 1000 / 61;
+let lastDrawn = 0;
+
 function loop(now: number) {
+  // Cap at 60fps: on 120-165Hz screens this halves GPU load for no visible gain
+  if (now - lastDrawn < MIN_FRAME_MS) { requestAnimationFrame(loop); return; }
+  lastDrawn = now;
   // The playback clock uses real elapsed time so slow devices don't drift behind live
   const real = Math.min(0.5, Math.max(0, now - last) / 1000);
   last = now;

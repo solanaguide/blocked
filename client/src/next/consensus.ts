@@ -44,7 +44,7 @@ export function recordConsensus(m: any) {
   const update = !!prev;
   bySlot.set(c.slot, c);
   // The settled outcome arrives in a later update for the same slot
-  if (c.fk && !prev?.fk) push(kinds, c.fk);
+  if (c.fk && !prev?.fk) push(kinds, c.fk, 1000);
   if (c.slot > newest) newest = c.slot;
   if (!update) {
     // A slot only counts once at least two nodes agree it's final

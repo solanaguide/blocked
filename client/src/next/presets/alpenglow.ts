@@ -274,12 +274,20 @@ interface Range {
   sparked: Set<string>;
   called: boolean;
   skipped: boolean;
+  beacon: THREE.Sprite;
+  route?: THREE.Vector3;      // the summit on this block's stretch of the beacon trail
 }
 
 /** The landscape, 0..~1.2: broad massifs carved by ridged noise, continuous in world space */
 function terrain(x: number, z: number) {
   const massif = 0.55 + 0.45 * (0.5 + 0.5 * simplex(x * 0.007 + 31, z * 0.007 + 57));
   return massif * Math.pow(ridged(x * 0.022, z * 0.022), 1.4) * 1.2;
+}
+
+/** Same ground-emergence as the terrain shader, for things placed on summits */
+function growAt(z: number) {
+  const t = Math.min(1, Math.max(0, (z - (Z0 + 0.5)) / (-9.5)));
+  return t * t * (3 - 2 * t);
 }
 
 /** Grid column → x: dense where the camera looks, sparse at the far edges */
@@ -316,11 +324,11 @@ export class Alpenglow implements Preset {
   private raysPulse = 0;
   readonly feed = 'windows';
   readonly legend = `
-    Each range = one block · height = compute used<br>
-    pink touch on the summits = notarized<i style="background:#ff80b8"></i><br>
-    alpenglow sweep = finalized<i style="background:#ff3a64"></i><br>
-    glint = one node sees it final<i style="background:#ffc0d0"></i><br>
-    finality = block + consensus`;
+    each slice = a block · height = compute<br>
+    pink touch = notarized<i style="background:#ff80b8"></i><br>
+    sunlight sweep = finalized<i style="background:#ff3a64"></i><br>
+    beacon = a final block, bright = new leader<i style="background:#ffe6ea"></i><br>
+    glint = one node sees it final<i style="background:#ffc0d0"></i>`;
 
   private ranges: Range[] = [];
   private index: THREE.BufferAttribute;
@@ -338,6 +346,7 @@ export class Alpenglow implements Preset {
   private sun = new THREE.Vector3(-0.8, 0.12, -0.6).normalize();
   private prevAmp?: number;
   private sunLight = new THREE.DirectionalLight();
+  private glowTex = starTexture();
 
   constructor() {
     this.scene.background = new THREE.Color('#070a18');
@@ -387,7 +396,10 @@ export class Alpenglow implements Preset {
       mesh.frustumCulled = false;
       mesh.visible = false;
       this.scene.add(mesh);
-      this.ranges.push({ mesh, u, slot: -1, h: 1, glow: 0, warm: 0, flareAt: -1e9, anchors: [], sparked: new Set(), called: false, skipped: false });
+      const beacon = new THREE.Sprite(new THREE.SpriteMaterial({ map: this.glowTex, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, opacity: 0 }));
+      beacon.renderOrder = 4;
+      this.scene.add(beacon);
+      this.ranges.push({ mesh, u, slot: -1, h: 1, glow: 0, warm: 0, flareAt: -1e9, anchors: [], sparked: new Set(), called: false, skipped: false, beacon });
     }
 
     const sky = new THREE.HemisphereLight('#6a6ad8', '#140e2a', 0.5);
@@ -407,6 +419,8 @@ export class Alpenglow implements Preset {
 
     // Far massifs beyond the last block: scenery, so the horizon is always mountains
     this.scene.add(this.backdrop());
+    // A dark foreground ridge frames the view and hides where new blocks emerge
+    this.scene.add(this.foreground());
 
     this.mist = new THREE.Mesh(
       new THREE.PlaneGeometry(600, 260),
@@ -421,7 +435,7 @@ export class Alpenglow implements Preset {
     this.mist.position.set(0, 1.1, -110);
     this.scene.add(this.mist);
 
-    const tex = starTexture();
+    const tex = this.glowTex;
     for (let i = 0; i < SPARKS; i++) {
       const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, opacity: 0 }));
       sprite.renderOrder = 5;
@@ -455,6 +469,39 @@ export class Alpenglow implements Preset {
     g.computeVertexNormals();
     // Always sunlit: the far range holds the glow
     const { mat } = terrainMaterial({ uH: { value: 55 }, uNotar: { value: 1 }, uFinal: { value: 1 }, uFlare: { value: 0 }, uFront: { value: Z0 }, uSun: { value: this.sun } });
+    const m = new THREE.Mesh(g, mat);
+    m.frustumCulled = false;
+    return m;
+  }
+
+  private foreground() {
+    const NXF = 260, NZF = 16, X = 95, ZA = 3, ZB = 17;
+    const pos = new Float32Array(NXF * NZF * 3);
+    for (let j = 0; j < NZF; j++) {
+      const z = ZA + ((ZB - ZA) * j) / (NZF - 1);
+      const zt = (z - ZA) / (ZB - ZA);
+      // Rises from behind and stays high toward the viewer, so no floor shows beneath it
+      const env = Math.min(1, zt * 2.2) * (1 + zt * 0.4);
+      for (let i = 0; i < NXF; i++) {
+        const x = -X + (2 * X * i) / (NXF - 1);
+        const sides = 1 + 2.2 * Math.min(1, Math.max(0, (Math.abs(x) - 10) / 28));
+        const k = (j * NXF + i) * 3;
+        pos[k] = x;
+        pos[k + 1] = env * sides * (1.6 + 4.5 * terrain(x * 1.3 + 400, z * 1.3)) - 0.7;
+        pos[k + 2] = z;
+      }
+    }
+    const idx: number[] = [];
+    for (let j = 0; j < NZF - 1; j++) for (let i = 0; i < NXF - 1; i++) {
+      const a = j * NXF + i;
+      idx.push(a, a + NXF, a + 1, a + 1, a + NXF, a + NXF + 1);
+    }
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+    g.setIndex(idx);
+    g.computeVertexNormals();
+    // In shadow: only skylight, never sun, so it reads as a silhouette
+    const { mat } = terrainMaterial({ uH: { value: 8 }, uNotar: { value: 0 }, uFinal: { value: 0 }, uFlare: { value: 0 }, uFront: { value: 100 }, uSun: { value: this.sun } });
     const m = new THREE.Mesh(g, mat);
     m.frustumCulled = false;
     return m;
@@ -519,6 +566,9 @@ export class Alpenglow implements Preset {
     }
     peaks.sort((a, b) => best[b] - best[a]);
     r.anchors = peaks.slice(0, ANCHORS).map((i) => new THREE.Vector3(colX(i), best[i], bestZ[i]));
+    const routeX = Math.sin(slot * 0.045) * 14 + Math.sin(slot * 0.017) * 8;
+    const near = peaks.filter((i) => Math.abs(colX(i) - routeX) < 7);
+    r.route = near.length ? new THREE.Vector3(colX(near[0]), best[near[0]], bestZ[near[0]]) : r.anchors[0];
     r.slot = slot;
     r.skipped = skipped;
     r.h = Math.max(amp, ampPrev) * 1.15;
@@ -549,7 +599,7 @@ export class Alpenglow implements Preset {
 
     for (const r of this.ranges) {
       const age = f.playhead - r.slot;
-      if (r.slot < 0 || age < 0 || age > HIST + 1) { r.mesh.visible = false; continue; }
+      if (r.slot < 0 || age < 0 || age > HIST + 1) { r.mesh.visible = false; r.beacon.visible = false; continue; }
       r.mesh.visible = true;
       r.mesh.position.set(0, 0, this.z(r.slot));
 
@@ -566,6 +616,17 @@ export class Alpenglow implements Preset {
       r.u.uFinal.value = r.warm;
       r.u.uFlare.value = r.flareAt > 0 ? Math.exp(-(now - r.flareAt) / 700) : 0;
       if (c?.finalized !== undefined && r.flareAt > 0 && !r.called) this.callout(r, c, now);
+      // Summit beacon: lit at finality, one per block; a new leader's first slot burns brighter
+      const lead = r.slot % 4 === 0;
+      const bm = r.beacon.material;
+      const emerged = r.route ? growAt(r.mesh.position.z + r.route.z) : 0;
+      if (r.route && r.warm > 0 && emerged > 0.95) {
+        r.beacon.visible = true;
+        r.beacon.position.set(r.route.x, r.route.y * growAt(r.mesh.position.z + r.route.z) + 0.6, r.mesh.position.z + r.route.z);
+        r.beacon.scale.setScalar((lead ? 0.75 : 0.42) * (1 + 1.2 * r.u.uFlare.value));
+        bm.color.set(lead ? '#ffc8a0' : '#ffe6ea');
+        bm.opacity = Math.min(1, r.warm * 3) * (lead ? 1 : 0.75);
+      } else r.beacon.visible = false;
     }
 
     for (const s of this.sparks) {
@@ -635,9 +696,9 @@ export class Alpenglow implements Preset {
 
   private callout(r: Range, c: Consensus, now: number) {
     r.called = true;
-    if (now - this.calloutAt < 3200 || !r.anchors.length || c.finalized === undefined) return;
+    if (r.slot % 20 !== 0 || !r.route || c.finalized === undefined) return;
     this.calloutAt = now;
-    const a = r.anchors[0].clone();
+    const a = r.route.clone().setY(r.route.y + 0.6);
     const slot = r.slot;
     const nodes = c.nodes.filter((x) => x.f !== undefined).length;
     const notar = c.notarized !== undefined ? `notarized +${c.notarized.toFixed(0)}ms · ` : '';
@@ -645,7 +706,7 @@ export class Alpenglow implements Preset {
       if (r.slot !== slot || this.z(slot) < -60) return null;
       return this.tmp.copy(a).add(r.mesh.position);
     }, `<b>SLOT ${fmtInt(slot)}</b><span>FINAL IN ${((c.dur ?? 0) + c.finalized).toFixed(0)}ms</span><i>block ${c.dur?.toFixed(0) ?? '—'}ms · ${notar}final +${c.finalized.toFixed(0)}ms · ${nodes} node${nodes === 1 ? '' : 's'}</i>`,
-    { life: 3000, dx: 70, dy: -80, cls: 'alp', side: 1 });
+    { life: 3600, dx: 60, dy: -70, cls: 'alp', side: 1 });
   }
 
   resize(w: number, h: number) {
@@ -660,7 +721,7 @@ export class Alpenglow implements Preset {
     return [
       { label: 'Finality', value: finalityMs(), fmt: (v) => (v ? v.toFixed(0) + 'ms' : '—'), color: '#ffc08a' },
       { label: 'Consensus after block', value: consensusMs(), fmt: (v) => (v ? v.toFixed(0) + 'ms' : '—'), color: '#ffd2c2' },
-      { label: 'Fast-finalized', value: kindShare('fast') * 100, fmt: (v) => (v ? v.toFixed(0) + '%' : '—'), color: '#ff9ab4' },
+      { label: 'Fast-finalized', value: kindShare('fast') * 100, fmt: (v) => (v ? v.toFixed(1) + '%' : '—'), color: '#ff9ab4' },
       { label: 'Block fill', value: s.fill * 100, fmt: (v) => v.toFixed(0) + '%', color: '#fff' },
     ];
   }
