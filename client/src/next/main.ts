@@ -187,13 +187,20 @@ let last = performance.now();
 let lastPlayhead = 0;
 let lastKpi = 0;
 
-const MIN_FRAME_MS = 1000 / 61;
-let lastDrawn = 0;
+// High-refresh screens (120-165Hz) render every Nth vsync, evenly paced, to land near 60-80fps
+const vsync: number[] = [];
+let lastVsync = 0, skip = 1, tick = 0;
 
 function loop(now: number) {
-  // Cap at 60fps: on 120-165Hz screens this halves GPU load for no visible gain
-  if (now - lastDrawn < MIN_FRAME_MS) { requestAnimationFrame(loop); return; }
-  lastDrawn = now;
+  if (vsync.length < 60) {
+    if (lastVsync) vsync.push(now - lastVsync);
+    lastVsync = now;
+    if (vsync.length === 60) {
+      const hz = 1000 / [...vsync].sort((a, b) => a - b)[30];
+      skip = Math.max(1, Math.floor(hz / 58));
+    }
+  }
+  if (++tick % skip !== 0) { requestAnimationFrame(loop); return; }
   // The playback clock uses real elapsed time so slow devices don't drift behind live
   const real = Math.min(0.5, Math.max(0, now - last) / 1000);
   last = now;

@@ -8,7 +8,7 @@ import { consensus, finalityMs, consensusMs, kindShare, type Consensus } from '.
 
 const LOW = typeof matchMedia !== 'undefined' && matchMedia('(max-width: 900px)').matches;
 const D = 2.6;                 // depth between neighbouring blocks' ranges
-const Z0 = 2;                  // where the newest range stands
+const Z0 = 9;                  // where the newest range emerges, just below the bottom of frame
 const HIST = LOW ? 44 : 64;    // ranges kept, receding into haze
 const HALF_W = 150;            // ranges span the whole horizon
 const NX = LOW ? 180 : 260;
@@ -161,7 +161,7 @@ const MIST_FRAG = /* glsl */ `
 
 type TerrainUniforms = Record<'uH' | 'uNotar' | 'uFinal' | 'uFlare' | 'uFront', { value: number }> & { uSun: { value: THREE.Vector3 } };
 
-const GROW_GLSL = /* glsl */ `smoothstep(uFront + 0.5, uFront - 9.0, (modelMatrix * vec4(position, 1.0)).z)`;
+const GROW_GLSL = /* glsl */ `smoothstep(uFront + 0.5, uFront - 5.0, (modelMatrix * vec4(position, 1.0)).z)`;
 
 /**
  * Physically based snow and rock under a real, shadow-casting low sun. The
@@ -274,8 +274,7 @@ interface Range {
   sparked: Set<string>;
   called: boolean;
   skipped: boolean;
-  beacon: THREE.Sprite;
-  route?: THREE.Vector3;      // the summit on this block's stretch of the beacon trail
+  route?: THREE.Vector3;      // where this block's tag attaches
 }
 
 /** The landscape, 0..~1.2: broad massifs carved by ridged noise, continuous in world space */
@@ -286,7 +285,7 @@ function terrain(x: number, z: number) {
 
 /** Same ground-emergence as the terrain shader, for things placed on summits */
 function growAt(z: number) {
-  const t = Math.min(1, Math.max(0, (z - (Z0 + 0.5)) / (-9.5)));
+  const t = Math.min(1, Math.max(0, (z - (Z0 + 0.5)) / (-5.5)));
   return t * t * (3 - 2 * t);
 }
 
@@ -327,7 +326,6 @@ export class Alpenglow implements Preset {
     each slice = a block · height = compute<br>
     pink touch = notarized<i style="background:#ff80b8"></i><br>
     sunlight sweep = finalized<i style="background:#ff3a64"></i><br>
-    beacon = a final block, bright = new leader<i style="background:#ffe6ea"></i><br>
     glint = one node sees it final<i style="background:#ffc0d0"></i>`;
 
   private ranges: Range[] = [];
@@ -345,6 +343,8 @@ export class Alpenglow implements Preset {
   private tmp = new THREE.Vector3();
   private sun = new THREE.Vector3(-0.8, 0.12, -0.6).normalize();
   private prevAmp?: number;
+  private present = new Map<number, boolean>();   // slot → produced a block
+  private tape?: HTMLCanvasElement;
   private sunLight = new THREE.DirectionalLight();
   private glowTex = starTexture();
 
@@ -396,10 +396,7 @@ export class Alpenglow implements Preset {
       mesh.frustumCulled = false;
       mesh.visible = false;
       this.scene.add(mesh);
-      const beacon = new THREE.Sprite(new THREE.SpriteMaterial({ map: this.glowTex, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, opacity: 0 }));
-      beacon.renderOrder = 4;
-      this.scene.add(beacon);
-      this.ranges.push({ mesh, u, slot: -1, h: 1, glow: 0, warm: 0, flareAt: -1e9, anchors: [], sparked: new Set(), called: false, skipped: false, beacon });
+      this.ranges.push({ mesh, u, slot: -1, h: 1, glow: 0, warm: 0, flareAt: -1e9, anchors: [], sparked: new Set(), called: false, skipped: false });
     }
 
     const sky = new THREE.HemisphereLight('#6a6ad8', '#140e2a', 0.5);
@@ -419,8 +416,6 @@ export class Alpenglow implements Preset {
 
     // Far massifs beyond the last block: scenery, so the horizon is always mountains
     this.scene.add(this.backdrop());
-    // A dark foreground ridge frames the view and hides where new blocks emerge
-    this.scene.add(this.foreground());
 
     this.mist = new THREE.Mesh(
       new THREE.PlaneGeometry(600, 260),
@@ -474,51 +469,25 @@ export class Alpenglow implements Preset {
     return m;
   }
 
-  private foreground() {
-    const NXF = 260, NZF = 16, X = 95, ZA = 3, ZB = 17;
-    const pos = new Float32Array(NXF * NZF * 3);
-    for (let j = 0; j < NZF; j++) {
-      const z = ZA + ((ZB - ZA) * j) / (NZF - 1);
-      const zt = (z - ZA) / (ZB - ZA);
-      // Rises from behind and stays high toward the viewer, so no floor shows beneath it
-      const env = Math.min(1, zt * 2.2) * (1 + zt * 0.4);
-      for (let i = 0; i < NXF; i++) {
-        const x = -X + (2 * X * i) / (NXF - 1);
-        const sides = 1 + 2.2 * Math.min(1, Math.max(0, (Math.abs(x) - 10) / 28));
-        const k = (j * NXF + i) * 3;
-        pos[k] = x;
-        pos[k + 1] = env * sides * (1.6 + 4.5 * terrain(x * 1.3 + 400, z * 1.3)) - 0.7;
-        pos[k + 2] = z;
-      }
-    }
-    const idx: number[] = [];
-    for (let j = 0; j < NZF - 1; j++) for (let i = 0; i < NXF - 1; i++) {
-      const a = j * NXF + i;
-      idx.push(a, a + NXF, a + 1, a + 1, a + NXF, a + NXF + 1);
-    }
-    const g = new THREE.BufferGeometry();
-    g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
-    g.setIndex(idx);
-    g.computeVertexNormals();
-    // In shadow: only skylight, never sun, so it reads as a silhouette
-    const { mat } = terrainMaterial({ uH: { value: 8 }, uNotar: { value: 0 }, uFinal: { value: 0 }, uFlare: { value: 0 }, uFront: { value: 100 }, uSun: { value: this.sun } });
-    const m = new THREE.Mesh(g, mat);
-    m.frustumCulled = false;
-    return m;
-  }
-
   activate() {
     this.callouts.visible = true;
+    this.tape = document.createElement('canvas');
+    this.tape.id = 'slot-tape';
+    document.body.appendChild(this.tape);
     const f = finalityMs();
     if (f) setTimeout(() => hero(`FINAL IN ${f.toFixed(0)}ms`), 900);
   }
 
   deactivate() {
+    this.tape?.remove();
+    this.tape = undefined;
     this.callouts.visible = false;
     this.callouts.clear();
   }
 
   enter(slot: number, block: Block | undefined) {
+    this.present.set(slot, !!block);
+    for (const k of this.present.keys()) { if (k < slot - 400) this.present.delete(k); else break; }
     // Recycle the oldest slice. A skipped slot still gets one: a low, unlit saddle
     const r = this.ranges.reduce((a, b) => (a.slot < b.slot ? a : b));
     const amp = block ? 7 + 14 * Math.min(1, block.cu / LIMITS.cu) : 2;
@@ -599,7 +568,7 @@ export class Alpenglow implements Preset {
 
     for (const r of this.ranges) {
       const age = f.playhead - r.slot;
-      if (r.slot < 0 || age < 0 || age > HIST + 1) { r.mesh.visible = false; r.beacon.visible = false; continue; }
+      if (r.slot < 0 || age < 0 || age > HIST + 1) { r.mesh.visible = false; continue; }
       r.mesh.visible = true;
       r.mesh.position.set(0, 0, this.z(r.slot));
 
@@ -616,17 +585,6 @@ export class Alpenglow implements Preset {
       r.u.uFinal.value = r.warm;
       r.u.uFlare.value = r.flareAt > 0 ? Math.exp(-(now - r.flareAt) / 700) : 0;
       if (c?.finalized !== undefined && r.flareAt > 0 && !r.called) this.callout(r, c, now);
-      // Summit beacon: lit at finality, one per block; a new leader's first slot burns brighter
-      const lead = r.slot % 4 === 0;
-      const bm = r.beacon.material;
-      const emerged = r.route ? growAt(r.mesh.position.z + r.route.z) : 0;
-      if (r.route && r.warm > 0 && emerged > 0.95) {
-        r.beacon.visible = true;
-        r.beacon.position.set(r.route.x, r.route.y * growAt(r.mesh.position.z + r.route.z) + 0.6, r.mesh.position.z + r.route.z);
-        r.beacon.scale.setScalar((lead ? 0.75 : 0.42) * (1 + 1.2 * r.u.uFlare.value));
-        bm.color.set(lead ? '#ffc8a0' : '#ffe6ea');
-        bm.opacity = Math.min(1, r.warm * 3) * (lead ? 1 : 0.75);
-      } else r.beacon.visible = false;
     }
 
     for (const s of this.sparks) {
@@ -640,17 +598,66 @@ export class Alpenglow implements Preset {
     }
 
     const { t, pointer, portrait } = f;
-    this.camera.position.set(Math.sin(t * 0.03) * 3 + pointer.x * 4, (portrait ? 9.5 : 8) - pointer.y * 1.2, portrait ? 28 : 22);
-    this.look.set(Math.sin(t * 0.03) * 1.5, 5, -60);
+    this.camera.position.set(Math.sin(t * 0.03) * 3 + pointer.x * 4, (portrait ? 15 : 13) - pointer.y * 1.2, portrait ? 30 : 24);
+    this.look.set(Math.sin(t * 0.03) * 1.5, 1.5, -60);
     this.camera.lookAt(this.look);
     this.callouts.visible = !portrait;
     this.callouts.update(this.camera, this.w, this.h);
+
+    this.drawTape(f.playhead);
 
     // Light shafts from the low sun, swelling briefly each time a block finalizes
     this.tmp.copy(this.camera.position).addScaledVector(this.sun, 1000).project(this.camera);
     this.rays.uv.set(this.tmp.x * 0.5 + 0.5, this.tmp.y * 0.5 + 0.5);
     this.raysPulse *= Math.exp(-f.dt / 0.5);
     this.rays.strength = this.tmp.z < 1 && this.quality > 1 ? 0.45 + this.raysPulse * 0.5 : 0;
+  }
+
+  /**
+   * The slot tape: one tick per slot sliding left, a tall tick at each new
+   * leader, lit pink when notarized and bright when finalized, on the same
+   * playback clock as the landscape. The gap between the newest tick and the
+   * bright front is finality itself.
+   */
+  private drawTape(playhead: number) {
+    const cv = this.tape;
+    if (!cv || !playhead) return;
+    const dpr = Math.min(devicePixelRatio, 2);
+    const W = cv.clientWidth, H = cv.clientHeight;
+    if (cv.width !== Math.round(W * dpr) || cv.height !== Math.round(H * dpr)) { cv.width = Math.round(W * dpr); cv.height = Math.round(H * dpr); }
+    const g = cv.getContext('2d')!;
+    g.setTransform(dpr, 0, 0, dpr, 0, 0);
+    g.clearRect(0, 0, W, H);
+    const px = W < 700 ? 7 : 10, right = W - 70, base = H - 6;
+    g.font = '10px "Share Tech Mono", monospace';
+    g.textBaseline = 'alphabetic';
+    let frontX = -1;
+    for (let s = Math.floor(playhead); s > playhead - right / px - 1; s--) {
+      const x = right - (playhead - s) * px;
+      if (x < 8) break;
+      const since = (playhead - s - 1) * this.slotMs;
+      const c = consensus(s);
+      const produced = this.present.get(s);
+      const lead = s % 4 === 0;
+      const h = lead ? 14 : 7;
+      let col = 'rgba(200,205,255,0.28)';
+      if (produced === false) col = 'rgba(120,40,60,0.9)';
+      else if (c?.finalized !== undefined && since >= c.finalized) { col = '#ffd6e0'; if (frontX < 0) frontX = x; }
+      else if (c?.notarized !== undefined && since >= c.notarized) col = '#ff7fae';
+      g.fillStyle = col;
+      g.fillRect(Math.round(x), base - h, lead ? 2 : 1.5, h);
+      if (s % 25 === 0) {
+        g.fillStyle = 'rgba(210,214,255,0.55)';
+        g.fillText(fmtInt(s).slice(-7), Math.round(x) + 4, base - 6);
+      }
+    }
+    // Ends of the tape: the newest slot, and where finality has reached
+    g.fillStyle = 'rgba(210,214,255,0.7)';
+    g.fillText('NOW', right + 8, base - 2);
+    if (frontX > 0) {
+      g.fillStyle = '#ffd6e0';
+      g.fillText('FINAL', frontX - 12, base - 17);
+    }
   }
 
   /**
