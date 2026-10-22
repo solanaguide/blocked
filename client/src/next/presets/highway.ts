@@ -19,7 +19,7 @@ export class Highway implements Preset {
   readonly feed = 'whales';
   readonly legend = `
     Block compute: succeeded<i style="background:var(--cyan)"></i><br>
-    failed<i style="background:var(--hot)"></i><br>
+    reverted<i style="background:#4b4466"></i><br>
     <span class="votes">votes<i style="background:#3a2d7a"></i><br></span>
     Jito tips<i style="background:var(--gold)"></i><br>
     Arch = new leader<i style="background:var(--magenta)"></i><br>

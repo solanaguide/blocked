@@ -79,8 +79,7 @@ export class Hud {
     const cells = '<em class="ok">■</em>'.repeat(w.produced) + '<em class="skip">■</em>'.repeat(w.skipped);
     this.push(
       `<span>${esc(clip(validatorName(w.leader) ?? short(w.leader)))}</span>${cells}` +
-      `<b>${(w.fill * 100).toFixed(0)}%</b><i>${w.feeDensity.toFixed(2)} L/CU</i>` +
-      (w.failedShare > 0.2 ? `<em class="skip">${(w.failedShare * 100).toFixed(0)}% fail</em>` : ''),
+      `<b>${(w.fill * 100).toFixed(0)}%</b><i>${w.feeDensity.toFixed(2)} L/CU</i>`,
     );
   }
 

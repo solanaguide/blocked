@@ -3,6 +3,8 @@ import type { Block } from '../feed';
 import { C, PITCH, HISTORY, LIMITS, SLAB_W, SLAB_H } from '../palette';
 import { NeonBoxes } from './neonboxes';
 
+// Reverted txns are routine (slippage limits), so they sit in a quiet tone
+const REVERTED = new THREE.Color('#4b4466');
 const LAYERS = 4;              // ok CU, failed CU, vote CU, jito tip cap
 const MAX = HISTORY * LAYERS;
 
@@ -84,7 +86,7 @@ export class Chain {
       let y = 0;
       const ok = b.okCu * scale, bad = b.failedCu * scale, vote = b.voteCu * scale;
       if (ok > 0.001) { bx.put(0, y + ok / 2, z, SLAB_W, ok, len, C.cyan, heat); y += ok; }
-      if (bad > 0.001) { bx.put(0, y + bad / 2, z, SLAB_W, bad, len, C.hot, heat); y += bad; }
+      if (bad > 0.001) { bx.put(0, y + bad / 2, z, SLAB_W, bad, len, REVERTED, heat * 0.5); y += bad; }
       if (vote > 0.001) { bx.put(0, y + vote / 2, z, SLAB_W * 0.92, vote, len * 0.92, C.vote, heat * 0.4); y += vote; }
       // Jito tips: a gold cap whose thickness tracks tips (log)
       const tips = Math.log10(1 + b.jitoTips / 1e3) * 0.09 * age;

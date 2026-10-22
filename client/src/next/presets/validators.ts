@@ -21,6 +21,8 @@ const POOL = PAST + 3;
 const PHOSPHOR = new THREE.Color('#39ff7a');
 const AMBER = new THREE.Color('#ffb000');
 const ALERT = new THREE.Color('#ff2a2a');
+// Reverted txns (mostly slippage limits doing their job): neutral, not an alarm
+const REVERTED = new THREE.Color('#56645b');
 const VOTE = new THREE.Color('#1d3b2a');
 const FRAME = new THREE.Color('#1f9a4a');
 
@@ -56,7 +58,7 @@ export class Validators implements Preset {
     Card = one leader's 4 slots · column = CU limit<br>
     1 tile = 1 transaction, stacked to real CU used<br>
     Jito<i style="background:#ffb000"></i> ok<i style="background:#39ff7a"></i>
-    failed<i style="background:#ff2a2a"></i> votes<i style="background:#1d3b2a"></i><br>
+    reverted<i style="background:#56645b"></i> votes<i style="background:#1d3b2a"></i><br>
     L/CU = fees per compute unit (packing value)`;
 
   private wins = new Map<number, Win>();
@@ -231,7 +233,7 @@ export class Validators implements Preset {
       const row = Math.floor(i / TILE_COLS), c = i % TILE_COLS;
       const lx = (c - (TILE_COLS - 1) / 2) * tw;
       const y = voteH + (row + 0.5) * th;
-      bx.put(cx + lx * cosT, y, cz - lx * sinT, tw * 0.82, Math.max(0.006, th * 0.78), 0.32, i < jito ? AMBER : i < ok ? PHOSPHOR : ALERT, heat, theta);
+      bx.put(cx + lx * cosT, y, cz - lx * sinT, tw * 0.82, Math.max(0.006, th * 0.78), 0.32, i < jito ? AMBER : i < ok ? PHOSPHOR : REVERTED, heat, theta);
     }
   }
 
