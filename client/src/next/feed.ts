@@ -1,3 +1,4 @@
+import type { Life } from './lifecycle';
 import type { WireBlockMessage } from '../../../shared/types';
 
 // Quote assets: a trade's "interesting" token is the other side of the pair
@@ -105,7 +106,7 @@ function wsUrl() {
   return `${location.protocol === 'https:' ? 'wss:' : 'ws:'}//${location.host}/ws`;
 }
 
-export function connectFeed(onBlock: (b: Block) => void, onStatus: (up: boolean) => void) {
+export function connectFeed(onBlock: (b: Block) => void, onStatus: (up: boolean) => void, onLife?: (l: Life) => void) {
   let retry = 1000;
   const open = () => {
     const ws = new WebSocket(wsUrl());
@@ -114,6 +115,7 @@ export function connectFeed(onBlock: (b: Block) => void, onStatus: (up: boolean)
       try {
         const m = JSON.parse(e.data);
         if (m.type === 'block') onBlock(decode(m));
+        else if (m.type === 'lifecycle') onLife?.({ slot: m.slot, t: m.t, c: m.c, o: m.o, r: m.r, dead: !!m.dead });
       } catch { /* ignore malformed frames */ }
     };
     ws.onclose = () => {
