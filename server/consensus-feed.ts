@@ -28,7 +28,7 @@ export interface ConsensusMessage {
 }
 
 const SEND_AFTER_MS = 900;       // most nodes have finalized well within this
-const LATE_UNTIL_MS = 10_000;    // slow stragglers still update the slot until then
+const LATE_UNTIL_MS = 10_000;    // stragglers and the outcome event still update the slot until then
 const RECENT = 60;
 
 export class ConsensusFeed {
@@ -60,15 +60,21 @@ export class ConsensusFeed {
   }
 
   private onEvent(e: any) {
-    if (typeof e.slot !== 'number' || typeof e.city !== 'string') return;
+    if (typeof e.slot !== 'number') return;
     let p = this.slots.get(e.slot);
     if (!p) {
       p = { durations: [], nodes: new Map(), first: Date.now(), sent: false };
       this.slots.set(e.slot, p);
     }
-    p.nk = e.notarization_kind ?? p.nk;
-    p.fk = e.finalization_kind ?? p.fk;
-    p.votes = e.vote_count ?? p.votes;
+    // Settled outcome, once per slot, ~1.5s after finality: kinds and vote count
+    if (e.stage === 'outcome') {
+      p.nk = e.notarization_kind ?? p.nk;
+      p.fk = e.finalization_kind ?? p.fk;
+      p.votes = e.vote_count ?? p.votes;
+      if (p.sent) this.send(e.slot, p);
+      return;
+    }
+    if (typeof e.city !== 'string') return;
     const node = p.nodes.get(e.city) ?? {};
     if (e.stage === 'completed' && typeof e.duration_ms === 'number') p.durations.push(e.duration_ms);
     if (e.stage === 'notarized' && typeof e.latency_ms === 'number') node.n ??= e.latency_ms;

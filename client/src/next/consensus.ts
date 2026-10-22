@@ -15,7 +15,8 @@ export interface Consensus {
 }
 
 const bySlot = new Map<number, Consensus>();
-const finals: number[] = [];
+const finals: number[] = [];      // block start → finalized (block time + consensus)
+const afters: number[] = [];      // block complete → finalized
 const kinds: string[] = [];
 const perCity = new Map<string, number[]>();
 const KEEP = 3000, SAMPLE = 150;
@@ -39,12 +40,18 @@ export function recordConsensus(m: any) {
     notarized: median(nodes.flatMap((x) => (x.n === undefined ? [] : [x.n]))),
     finalized: median(nodes.flatMap((x) => (x.f === undefined ? [] : [x.f]))),
   };
-  const update = bySlot.has(c.slot);
+  const prev = bySlot.get(c.slot);
+  const update = !!prev;
   bySlot.set(c.slot, c);
+  // The settled outcome arrives in a later update for the same slot
+  if (c.fk && !prev?.fk) push(kinds, c.fk);
   if (c.slot > newest) newest = c.slot;
   if (!update) {
-    if (c.finalized !== undefined) push(finals, c.finalized);
-    if (c.fk) push(kinds, c.fk);
+    // A slot only counts once at least two nodes agree it's final
+    if (c.finalized !== undefined && nodes.filter((x) => x.f !== undefined).length >= 2) {
+      push(afters, c.finalized);
+      if (c.dur !== undefined) push(finals, c.dur + c.finalized);
+    }
     for (const x of nodes) if (x.f !== undefined) {
       const a = perCity.get(x.city) ?? [];
       push(a, x.f, 60);
@@ -56,8 +63,13 @@ export function recordConsensus(m: any) {
 
 export const consensus = (slot: number) => bySlot.get(slot);
 export const hasConsensus = () => newest > 0;
-/** Median ms from block completion to finalized, across nodes and recent slots */
+/**
+ * Median finality: from the block starting to be produced to finalized, i.e.
+ * block time + consensus. Comparable to dashboards' "finalization lag" (~1 slot).
+ */
 export const finalityMs = () => median(finals) ?? 0;
+/** Median consensus alone: block complete → finalized */
+export const consensusMs = () => median(afters) ?? 0;
 /** Share of recent slots finalized on the given path */
 export const kindShare = (k: string) => (kinds.length ? kinds.filter((x) => x === k).length / kinds.length : 0);
 export const cityFinality = () => [...perCity].map(([city, v]) => ({ city, ms: median(v)! })).sort((a, b) => a.ms - b.ms);

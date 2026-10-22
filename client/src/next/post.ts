@@ -32,16 +32,48 @@ const CRT = {
     }`,
 };
 
+// Screen-space light shafts: bright pixels smeared toward the sun's position
+const RAYS = {
+  uniforms: { tDiffuse: { value: null }, uSun: { value: new THREE.Vector2() }, uStrength: { value: 0 }, uTint: { value: new THREE.Color('#ffb08a') } },
+  vertexShader: `varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }`,
+  fragmentShader: `
+    uniform sampler2D tDiffuse; uniform vec2 uSun; uniform float uStrength; uniform vec3 uTint; varying vec2 vUv;
+    void main(){
+      vec3 base = texture2D(tDiffuse, vUv).rgb;
+      const int N = 48;
+      vec2 stepv = (vUv - uSun) / float(N) * 0.85;
+      vec2 uv = vUv;
+      float illum = 1.0;
+      vec3 acc = vec3(0.0);
+      for (int i = 0; i < N; i++) {
+        uv -= stepv;
+        if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0) break;
+        vec3 c = texture2D(tDiffuse, uv).rgb;
+        float l = max(max(c.r, max(c.g, c.b)) - 0.68, 0.0);
+        acc += c * l * illum;
+        illum *= 0.962;
+      }
+      gl_FragColor = vec4(base + acc * uTint * (uStrength / float(N)), 1.0);
+    }`,
+};
+
+export interface Rays { uv: THREE.Vector2; strength: number }
+
 export class Post {
   readonly composer: EffectComposer;
   private pass: RenderPass;
   private bloom: UnrealBloomPass;
   private crt: ShaderPass;
+  private rays: ShaderPass;
+  private raysSrc?: Rays;
 
   constructor(private renderer: THREE.WebGLRenderer, scene: THREE.Scene, camera: THREE.Camera) {
     this.composer = new EffectComposer(renderer);
     this.pass = new RenderPass(scene, camera);
     this.composer.addPass(this.pass);
+    this.rays = new ShaderPass(RAYS);
+    this.rays.enabled = false;
+    this.composer.addPass(this.rays);
     this.bloom = new UnrealBloomPass(new THREE.Vector2(256, 256), 0.7, 0.45, 0.42);
     this.composer.addPass(this.bloom);
     this.crt = new ShaderPass(CRT);
@@ -49,7 +81,9 @@ export class Post {
     this.composer.addPass(new OutputPass());
   }
 
-  use(scene: THREE.Scene, camera: THREE.Camera, bloom: [number, number, number], crt = 1) {
+  use(scene: THREE.Scene, camera: THREE.Camera, bloom: [number, number, number], crt = 1, rays?: Rays) {
+    this.raysSrc = rays;
+    this.rays.enabled = !!rays;
     this.crt.uniforms.crt.value = crt;
     this.pass.scene = scene;
     this.pass.camera = camera;
@@ -66,6 +100,10 @@ export class Post {
   render(t: number, glitch: number) {
     this.crt.uniforms.time.value = t;
     this.crt.uniforms.glitch.value = glitch;
+    if (this.raysSrc) {
+      this.rays.uniforms.uSun.value.copy(this.raysSrc.uv);
+      this.rays.uniforms.uStrength.value = this.raysSrc.strength;
+    }
     this.composer.render();
   }
 }

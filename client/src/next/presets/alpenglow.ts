@@ -4,7 +4,7 @@ import type { Stats } from '../stats';
 import type { Preset, Frame, Kpi } from './types';
 import { LIMITS, fmtInt } from '../palette';
 import { Callouts } from '../callouts';
-import { consensus, finalityMs, cityFinality, type Consensus } from '../consensus';
+import { consensus, finalityMs, consensusMs, kindShare, type Consensus } from '../consensus';
 
 const LOW = typeof matchMedia !== 'undefined' && matchMedia('(max-width: 900px)').matches;
 const D = 2.6;                 // depth between neighbouring blocks' ranges
@@ -83,25 +83,6 @@ const NOISE_GLSL = /* glsl */ `
   }
 `;
 
-const RANGE_VERT = /* glsl */ `
-  uniform float uFront;
-  varying vec3 vWorld;
-  varying vec3 vNormal;
-  varying float vLocalY;
-  void main() {
-    vLocalY = position.y;
-    vec4 w = modelMatrix * vec4(position, 1.0);
-    // Terrain emerges from the ground near the viewer and grows as it recedes,
-    // so the newest slice never shows a cut edge
-    float grow = smoothstep(uFront + 0.5, uFront - 9.0, w.z);
-    w.y = mix(-0.7, w.y, grow);
-    vec3 n = normalize(mat3(modelMatrix) * normal);
-    vNormal = normalize(vec3(n.x * grow, n.y, n.z * grow));
-    vWorld = w.xyz;
-    gl_Position = projectionMatrix * viewMatrix * w;
-  }
-`;
-
 // Shared atmosphere: twilight haze, warmed toward the low sun on the left
 const ATMOS_GLSL = /* glsl */ `
   uniform vec3 uSun;
@@ -118,57 +99,6 @@ const ATMOS_GLSL = /* glsl */ `
     vec3 mistCol = mix(vec3(0.12, 0.11, 0.3), vec3(0.6, 0.28, 0.45), pow(toSun, 3.0) * 0.8);
     col = mix(col, mistCol, mist * (0.4 + 0.6 * haze));
     return mix(col, hazeCol, haze);
-  }
-`;
-
-const RANGE_FRAG = /* glsl */ `
-  uniform float uH;
-  uniform float uNotar;     // 0..1: soft pink settling on the summits once notarized
-  uniform float uFinal;     // 0..1: hot alpenglow sweeping across and down once finalized
-  uniform float uFlare;
-  varying vec3 vWorld;
-  varying vec3 vNormal;
-  varying float vLocalY;
-  ${NOISE_GLSL}
-  ${ATMOS_GLSL}
-  void main() {
-    vec3 p = vWorld * vec3(0.5, 1.0, 0.5);
-    float f0 = fbm3(p);
-    const float e = 0.15;
-    vec2 g = vec2(fbm3(p + vec3(e, 0.0, 0.0)) - f0, fbm3(p + vec3(0.0, 0.0, e)) - f0) / e;
-    vec3 N = normalize(normalize(vNormal) - vec3(g.x, 0.0, g.y) * 0.35);
-    float slope = 1.0 - N.y;
-    float yn = clamp(vLocalY / uH, 0.0, 1.2);
-
-    // Snow everywhere it can hold; dark rock on the steep faces
-    float snow = smoothstep(0.42, 0.26, slope + (f0 - 0.5) * 0.3) * smoothstep(0.02, 0.15, yn);
-    float strata = 0.85 + 0.15 * sin(vWorld.y * 4.0 + f0 * 7.0);
-    vec3 rock = mix(vec3(0.07, 0.065, 0.09), vec3(0.17, 0.15, 0.19), f0) * strata;
-    vec3 albedo = mix(rock, vec3(0.86, 0.88, 0.97), snow);
-
-    // Twilight skylight: unlit snow reads lavender-blue
-    vec3 amb = mix(vec3(0.05, 0.045, 0.15), vec3(0.2, 0.2, 0.5), N.y * 0.5 + 0.5) * 0.42;
-
-    vec3 L = normalize(uSun);
-    float diff = max((dot(N, L) + 0.3) / 1.3, 0.0);
-    // Notarized: a soft first touch on the very summits
-    float litN = smoothstep(0.86, 0.95, yn) * uNotar;
-    // Finalized: alpenglow sweeps in from the sun's side and pours down to mid-slope
-    float sweep = mix(-60.0, 60.0, uFinal);
-    float across = clamp(smoothstep(sweep + 5.0, sweep - 5.0, vWorld.x) + step(0.999, uFinal), 0.0, 1.0);
-    float floorLine = mix(1.05, 0.32, smoothstep(0.0, 1.0, uFinal));
-    float litF = across * smoothstep(floorLine - 0.06, floorLine + 0.1, yn + (f0 - 0.5) * 0.12) * step(0.001, uFinal);
-    vec3 blush = vec3(1.0, 0.5, 0.72) * 1.6;
-    vec3 glow = mix(vec3(1.0, 0.12, 0.22), vec3(1.0, 0.22, 0.48), snow) * 3.4;
-    vec3 light = blush * litN * (1.0 - litF) + glow * litF;
-    vec3 col = albedo * (amb + light * diff);
-    vec3 V = normalize(cameraPosition - vWorld);
-    col += light * pow(max(dot(reflect(-L, N), V), 0.0), 24.0) * snow * 0.25;
-    // The sweep's leading edge burns brighter as it crosses the peaks
-    float front = (1.0 - smoothstep(0.0, 4.0, abs(vWorld.x - sweep))) * step(0.001, uFinal) * step(uFinal, 0.98);
-    col += vec3(1.0, 0.35, 0.45) * front * smoothstep(0.4, 0.95, yn) * 0.5 * diff;
-    col += vec3(1.0, 0.55, 0.6) * uFlare * smoothstep(0.85, 1.0, yn) * 0.5;
-    gl_FragColor = vec4(atmosphere(col, vWorld), 1.0);
   }
 `;
 
@@ -226,6 +156,89 @@ const MIST_FRAG = /* glsl */ `
   }
 `;
 
+// ---------- terrain material ----------
+
+type TerrainUniforms = Record<'uH' | 'uNotar' | 'uFinal' | 'uFlare' | 'uFront', { value: number }> & { uSun: { value: THREE.Vector3 } };
+
+const GROW_GLSL = /* glsl */ `smoothstep(uFront + 0.5, uFront - 9.0, (modelMatrix * vec4(position, 1.0)).z)`;
+
+/**
+ * Physically based snow and rock under a real, shadow-casting low sun. The
+ * data never recolours the ground: it only decides whether the sunlight has
+ * reached this block's slice yet (notarized: a first touch on the summits;
+ * finalized: the light sweeps across and down). Skylight is always there.
+ */
+function terrainMaterial(u: TerrainUniforms) {
+  const mat = new THREE.MeshStandardMaterial({ color: '#ffffff', roughness: 0.6, metalness: 0, shadowSide: THREE.BackSide });
+  mat.onBeforeCompile = (sh) => {
+    Object.assign(sh.uniforms, u);
+    sh.vertexShader = sh.vertexShader
+      .replace('#include <common>', `#include <common>
+        uniform float uFront;
+        varying vec3 vWorldP;
+        varying vec3 vWorldN;
+        varying float vLocalY;`)
+      .replace('#include <beginnormal_vertex>', `#include <beginnormal_vertex>
+        float growN = ${GROW_GLSL};
+        objectNormal = normalize(vec3(objectNormal.x * growN, objectNormal.y, objectNormal.z * growN));
+        vWorldN = normalize(mat3(modelMatrix) * objectNormal);`)
+      .replace('#include <begin_vertex>', `#include <begin_vertex>
+        vLocalY = position.y;
+        // Terrain emerges from the ground near the viewer: no cut edge on the newest slice
+        transformed.y = mix(-0.7, transformed.y, ${GROW_GLSL});
+        vWorldP = (modelMatrix * vec4(transformed, 1.0)).xyz;`);
+    sh.fragmentShader = sh.fragmentShader
+      .replace('#include <common>', `#include <common>
+        uniform float uH;
+        uniform float uNotar;
+        uniform float uFinal;
+        uniform float uFlare;
+        varying vec3 vWorldP;
+        varying vec3 vWorldN;
+        varying float vLocalY;
+        ${NOISE_GLSL}
+        ${ATMOS_GLSL}`)
+      .replace('#include <color_fragment>', `#include <color_fragment>
+        vec3 pN = vWorldP * vec3(0.5, 1.0, 0.5);
+        float f0 = fbm3(pN);
+        float slope = 1.0 - normalize(vWorldN).y;
+        float yn = clamp(vLocalY / uH, 0.0, 1.2);
+        float snowM = smoothstep(0.44, 0.27, slope + (f0 - 0.5) * 0.3) * smoothstep(0.02, 0.14, yn);
+        float strata = 0.82 + 0.18 * sin(vWorldP.y * 4.0 + f0 * 7.0);
+        vec3 rockC = mix(vec3(0.05, 0.045, 0.06), vec3(0.15, 0.13, 0.15), f0) * strata;
+        diffuseColor.rgb = mix(rockC, vec3(0.9, 0.92, 1.0), snowM);`)
+      .replace('#include <roughnessmap_fragment>', `#include <roughnessmap_fragment>
+        roughnessFactor = mix(0.92, 0.55, snowM);`)
+      .replace('#include <normal_fragment_maps>', `#include <normal_fragment_maps>
+        const float be = 0.15;
+        vec2 bg = vec2(fbm3(pN + vec3(be, 0.0, 0.0)) - f0, fbm3(pN + vec3(0.0, 0.0, be)) - f0) / be;
+        normal = normalize(normal - (viewMatrix * vec4(bg.x, 0.0, bg.y, 0.0)).xyz * 0.35);`)
+      .replace('#include <lights_fragment_end>', `#include <lights_fragment_end>
+        // Has the sunlight reached this slice yet?
+        float litN = smoothstep(0.84, 0.95, yn) * uNotar;
+        float sweep = mix(-70.0, 70.0, uFinal);
+        float across = clamp(smoothstep(sweep + 6.0, sweep - 6.0, vWorldP.x) + step(0.999, uFinal), 0.0, 1.0);
+        float floorLine = mix(1.05, 0.18, smoothstep(0.0, 1.0, uFinal));
+        float litF = across * smoothstep(floorLine - 0.08, floorLine + 0.12, yn + (f0 - 0.5) * 0.12) * step(0.001, uFinal);
+        float reveal = max(litF, litN * 0.4);
+        reflectedLight.directDiffuse *= reveal;
+        reflectedLight.directSpecular *= reveal;
+        reflectedLight.directDiffuse += diffuseColor.rgb * vec3(1.0, 0.45, 0.55) * uFlare * smoothstep(0.85, 1.0, yn) * 0.25;`)
+      .replace('#include <fog_fragment>', `gl_FragColor.rgb = atmosphere(gl_FragColor.rgb, vWorldP);`);
+  };
+  mat.customProgramCacheKey = () => 'alpenglow-terrain';
+  // Shadows must see the same ground-emergence as the visible terrain
+  const depth = new THREE.MeshDepthMaterial({ depthPacking: THREE.RGBADepthPacking });
+  depth.onBeforeCompile = (sh) => {
+    Object.assign(sh.uniforms, { uFront: u.uFront });
+    sh.vertexShader = sh.vertexShader
+      .replace('#include <common>', '#include <common>\nuniform float uFront;')
+      .replace('#include <begin_vertex>', `#include <begin_vertex>\ntransformed.y = mix(-0.7, transformed.y, ${GROW_GLSL});`);
+  };
+  depth.customProgramCacheKey = () => 'alpenglow-terrain-depth';
+  return { mat, depth };
+}
+
 // ---------- sprites ----------
 
 function starTexture() {
@@ -246,7 +259,7 @@ function starTexture() {
 
 interface Range {
   mesh: THREE.Mesh;
-  mat: THREE.ShaderMaterial;
+  u: TerrainUniforms;
   slot: number;
   h: number;
   glow: number;
@@ -289,13 +302,15 @@ export class Alpenglow implements Preset {
   readonly camera = new THREE.PerspectiveCamera(42, 1, 0.1, 2000);
   readonly bloom: [number, number, number] = [0.55, 0.7, 0.72];
   readonly crt = 0;
+  readonly rays = { uv: new THREE.Vector2(), strength: 0 };
+  private raysPulse = 0;
   readonly feed = 'windows';
   readonly legend = `
     Each range = one block · height = compute used<br>
     pink touch on the summits = notarized<i style="background:#ff80b8"></i><br>
     alpenglow sweep = finalized<i style="background:#ff3a64"></i><br>
     glint = one node sees it final<i style="background:#ffc0d0"></i><br>
-    ms after each block, Firedancer nodes`;
+    finality = block + consensus`;
 
   private ranges: Range[] = [];
   private index: THREE.BufferAttribute;
@@ -310,8 +325,9 @@ export class Alpenglow implements Preset {
   private h = 1;
   private look = new THREE.Vector3();
   private tmp = new THREE.Vector3();
-  private sun = new THREE.Vector3(-1, 0.13, -0.35).normalize();
+  private sun = new THREE.Vector3(-0.8, 0.12, -0.6).normalize();
   private prevAmp?: number;
+  private sunLight = new THREE.DirectionalLight();
 
   constructor() {
     this.scene.background = new THREE.Color('#070a18');
@@ -348,24 +364,35 @@ export class Alpenglow implements Preset {
     }
     this.index = new THREE.BufferAttribute(new Uint32Array(idx), 1);
 
-    const base = new THREE.ShaderMaterial({
-      vertexShader: RANGE_VERT,
-      fragmentShader: RANGE_FRAG,
-      uniforms: { uH: { value: 1 }, uNotar: { value: 0 }, uFinal: { value: 0 }, uFlare: { value: 0 }, uSun: { value: this.sun }, uFront: { value: Z0 } },
-    });
     for (let k = 0; k < HIST; k++) {
       const g = new THREE.BufferGeometry();
       g.setIndex(this.index);
       g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(NX * NZ * 3), 3));
       g.setAttribute('normal', new THREE.BufferAttribute(new Float32Array(NX * NZ * 3), 3));
-      const mat = base.clone();
-      mat.uniforms.uSun.value = this.sun;
+      const u: TerrainUniforms = { uH: { value: 1 }, uNotar: { value: 0 }, uFinal: { value: 0 }, uFlare: { value: 0 }, uFront: { value: Z0 }, uSun: { value: this.sun } };
+      const { mat, depth } = terrainMaterial(u);
       const mesh = new THREE.Mesh(g, mat);
+      mesh.customDepthMaterial = depth;
+      mesh.castShadow = mesh.receiveShadow = true;
       mesh.frustumCulled = false;
       mesh.visible = false;
       this.scene.add(mesh);
-      this.ranges.push({ mesh, mat, slot: -1, h: 1, glow: 0, warm: 0, flareAt: -1e9, anchors: [], sparked: new Set(), called: false, skipped: false });
+      this.ranges.push({ mesh, u, slot: -1, h: 1, glow: 0, warm: 0, flareAt: -1e9, anchors: [], sparked: new Set(), called: false, skipped: false });
     }
+
+    const sky = new THREE.HemisphereLight('#6a6ad8', '#140e2a', 0.5);
+    this.scene.add(sky);
+    this.sunLight.color.set('#ff5a74');
+    this.sunLight.intensity = 9;
+    this.sunLight.castShadow = true;
+    this.sunLight.shadow.mapSize.setScalar(LOW ? 2048 : 4096);
+    const sc = this.sunLight.shadow.camera;
+    sc.left = -130; sc.right = 130; sc.top = 130; sc.bottom = -130; sc.near = 10; sc.far = 900;
+    this.sunLight.shadow.bias = -0.0015;
+    this.sunLight.shadow.normalBias = 1.4;
+    this.sunLight.target.position.set(0, 0, -80);
+    this.sunLight.position.copy(this.sunLight.target.position).addScaledVector(this.sun, 400);
+    this.scene.add(this.sunLight, this.sunLight.target);
 
     // Far massifs beyond the last block: scenery, so the horizon is always mountains
     this.scene.add(this.backdrop());
@@ -415,12 +442,8 @@ export class Alpenglow implements Preset {
     g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
     g.setIndex(idx);
     g.computeVertexNormals();
-    const mat = new THREE.ShaderMaterial({
-      vertexShader: RANGE_VERT,
-      fragmentShader: RANGE_FRAG,
-      // Fully lit: the far range always holds the last of the glow
-      uniforms: { uH: { value: 55 }, uNotar: { value: 1 }, uFinal: { value: 1 }, uFlare: { value: 0 }, uSun: { value: this.sun }, uFront: { value: Z0 } },
-    });
+    // Always sunlit: the far range holds the glow
+    const { mat } = terrainMaterial({ uH: { value: 55 }, uNotar: { value: 1 }, uFinal: { value: 1 }, uFlare: { value: 0 }, uFront: { value: Z0 }, uSun: { value: this.sun } });
     const m = new THREE.Mesh(g, mat);
     m.frustumCulled = false;
     return m;
@@ -429,7 +452,7 @@ export class Alpenglow implements Preset {
   activate() {
     this.callouts.visible = true;
     const f = finalityMs();
-    if (f) setTimeout(() => hero(`FINAL ${f.toFixed(0)}ms AFTER EACH BLOCK`), 900);
+    if (f) setTimeout(() => hero(`FINAL IN ${f.toFixed(0)}ms`), 900);
   }
 
   deactivate() {
@@ -493,7 +516,7 @@ export class Alpenglow implements Preset {
     r.flareAt = -1e9;
     r.sparked = new Set();
     r.called = false;
-    r.mat.uniforms.uH.value = r.h;
+    r.u.uH.value = r.h;
   }
 
   trade() { /* this view is about consensus, not markets */ }
@@ -523,11 +546,11 @@ export class Alpenglow implements Preset {
       // Driven by playback time, so slow frames don't slow the light
       r.glow = c?.notarized !== undefined ? clamp01((since - c.notarized) / 350) : 0;
       r.warm = c?.finalized !== undefined ? clamp01((since - c.finalized) / 750) : 0;
-      if (r.warm > 0 && r.flareAt < 0) r.flareAt = now;
+      if (r.warm > 0 && r.flareAt < 0) { r.flareAt = now; this.raysPulse = Math.min(1, this.raysPulse + 0.5); }
       if (c) this.sparkle(r, c, since);
-      r.mat.uniforms.uNotar.value = r.glow;
-      r.mat.uniforms.uFinal.value = r.warm;
-      r.mat.uniforms.uFlare.value = r.flareAt > 0 ? Math.exp(-(now - r.flareAt) / 700) : 0;
+      r.u.uNotar.value = r.glow;
+      r.u.uFinal.value = r.warm;
+      r.u.uFlare.value = r.flareAt > 0 ? Math.exp(-(now - r.flareAt) / 700) : 0;
       if (c?.finalized !== undefined && r.flareAt > 0 && !r.called) this.callout(r, c, now);
     }
 
@@ -547,6 +570,12 @@ export class Alpenglow implements Preset {
     this.camera.lookAt(this.look);
     this.callouts.visible = !portrait;
     this.callouts.update(this.camera, this.w, this.h);
+
+    // Light shafts from the low sun, swelling briefly each time a block finalizes
+    this.tmp.copy(this.camera.position).addScaledVector(this.sun, 1000).project(this.camera);
+    this.rays.uv.set(this.tmp.x * 0.5 + 0.5, this.tmp.y * 0.5 + 0.5);
+    this.raysPulse *= Math.exp(-f.dt / 0.5);
+    this.rays.strength = this.tmp.z < 1 ? 0.45 + this.raysPulse * 0.5 : 0;
   }
 
   /** One sparkle per node, on its own summit, when that node saw the stage */
@@ -578,12 +607,12 @@ export class Alpenglow implements Preset {
     const a = r.anchors[0].clone();
     const slot = r.slot;
     const nodes = c.nodes.filter((x) => x.f !== undefined).length;
-    const notar = c.notarized !== undefined ? `notarized ${c.notarized.toFixed(0)}ms · ` : '';
+    const notar = c.notarized !== undefined ? `notarized +${c.notarized.toFixed(0)}ms · ` : '';
     this.callouts.add(() => {
       if (r.slot !== slot || this.z(slot) < -60) return null;
       return this.tmp.copy(a).add(r.mesh.position);
-    }, `<b>SLOT ${fmtInt(slot)}</b><span>FINAL ${c.finalized.toFixed(0)}ms</span><i>${notar}${nodes} node${nodes === 1 ? '' : 's'}</i>`,
-    { life: 4800, dx: 70, dy: -80, cls: 'alp', side: 1 });
+    }, `<b>SLOT ${fmtInt(slot)}</b><span>FINAL IN ${((c.dur ?? 0) + c.finalized).toFixed(0)}ms</span><i>block ${c.dur?.toFixed(0) ?? '—'}ms · ${notar}final +${c.finalized.toFixed(0)}ms · ${nodes} node${nodes === 1 ? '' : 's'}</i>`,
+    { life: 3000, dx: 70, dy: -80, cls: 'alp', side: 1 });
   }
 
   resize(w: number, h: number) {
@@ -596,10 +625,10 @@ export class Alpenglow implements Preset {
 
   kpis(s: Stats): Kpi[] {
     return [
-      { label: 'Final after block', value: finalityMs(), fmt: (v) => (v ? v.toFixed(0) + 'ms' : '—'), color: '#ffc08a' },
-      { label: 'Slot time', value: s.slotTimeMs, fmt: (v) => (v ? v.toFixed(0) + 'ms' : '—'), color: '#ffd2c2' },
+      { label: 'Finality', value: finalityMs(), fmt: (v) => (v ? v.toFixed(0) + 'ms' : '—'), color: '#ffc08a' },
+      { label: 'Consensus after block', value: consensusMs(), fmt: (v) => (v ? v.toFixed(0) + 'ms' : '—'), color: '#ffd2c2' },
+      { label: 'Fast-finalized', value: kindShare('fast') * 100, fmt: (v) => (v ? v.toFixed(0) + '%' : '—'), color: '#ff9ab4' },
       { label: 'Block fill', value: s.fill * 100, fmt: (v) => v.toFixed(0) + '%', color: '#fff' },
-      { label: 'Observer nodes', value: cityFinality().length, fmt: (v) => v.toFixed(0), color: '#ff9ab4' },
     ];
   }
 }

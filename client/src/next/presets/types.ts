@@ -37,6 +37,8 @@ export interface Preset {
   readonly bloom: [strength: number, radius: number, threshold: number];
   /** Retro CRT finish strength, 0 = clean film finish (default 1) */
   readonly crt?: number;
+  /** Screen-space light shafts toward a sun position, updated by the preset each frame */
+  readonly rays?: { uv: THREE.Vector2; strength: number };
   /** Which ticker the HUD shows: big trades, or this preset's own rows */
   readonly feed: 'whales' | 'windows';
 

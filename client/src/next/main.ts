@@ -19,6 +19,9 @@ const renderer = new THREE.WebGLRenderer({ antialias: false, powerPreference: 'h
 renderer.setPixelRatio(Math.min(devicePixelRatio, 1.5));
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.toneMappingExposure = 0.9;
+// Only scenes with shadow-casting lights (Alpenglow's sun) pay for this
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 document.getElementById('stage')!.appendChild(renderer.domElement);
 
 const presets: Preset[] = [new Highway(), new Validators(), new Spectrum(), new City(), new Alpenglow()];
@@ -104,7 +107,7 @@ function use(i: number) {
   active.deactivate?.();
   active = presets[(i + presets.length) % presets.length];
   active.activate?.();
-  post.use(active.scene, active.camera, active.bloom, active.crt ?? 1);
+  post.use(active.scene, active.camera, active.bloom, active.crt ?? 1, active.rays);
   active.resize(innerWidth, innerHeight);
   hud.usePreset(active.id, active.title, active.legend, active.feed, presets.indexOf(active), presets.length);
   hud.kpis(active.kpis(stats));
