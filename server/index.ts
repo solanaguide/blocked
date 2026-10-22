@@ -10,7 +10,6 @@ import type { WireBlockMessage, WireTokenEntry, WireProgramEntry, CompactTrade, 
 import { VALID_INTERVALS } from '../shared/types.js';
 import { TimeAggregator } from './time-aggregator.js';
 import type { TradeSummary } from './time-aggregator.js';
-import { SlotLifecycleFeed } from './slot-lifecycle.js';
 
 const app = express();
 const server = createServer(app);
@@ -27,7 +26,6 @@ let redisConnected = false;
 const startTime = Date.now();
 
 const timeAggregator = new TimeAggregator();
-const slotLifecycle = new SlotLifecycleFeed((m) => broadcast(m));
 timeAggregator.onBucketComplete((interval, data) => {
   broadcast(data, interval);
 });
@@ -136,7 +134,6 @@ wss.on('connection', (ws, req) => {
   const clientIp = req.headers['x-forwarded-for'] || req.socket.remoteAddress;
   console.log(`WS connect: ${clientIp} (${clients.size + 1} total)`);
   clients.set(ws, { channels: new Set(['blocks']) });
-  for (const m of slotLifecycle.history()) ws.send(JSON.stringify(m));
 
   ws.on('message', (raw) => {
     try {
@@ -459,7 +456,6 @@ async function start() {
     redisConnected = true;
 
     timeAggregator.start();
-    slotLifecycle.start();
 
     server.listen(config.websocket.port, () => {
       console.log(`Server started on port ${config.websocket.port}`);
@@ -477,7 +473,6 @@ async function start() {
 process.on('SIGINT', async () => {
   console.log('\nShutting down...');
   timeAggregator.stop();
-  slotLifecycle.stop();
   await redisSubscriber.close();
   server.close();
   process.exit(0);
@@ -486,7 +481,6 @@ process.on('SIGINT', async () => {
 process.on('SIGTERM', async () => {
   console.log('\nSIGTERM received, shutting down...');
   timeAggregator.stop();
-  slotLifecycle.stop();
   await redisSubscriber.close();
   server.close();
   process.exit(0);

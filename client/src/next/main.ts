@@ -12,8 +12,6 @@ import { Highway } from './presets/highway';
 import { Validators } from './presets/validators';
 import { Spectrum } from './presets/spectrum';
 import { City } from './presets/city';
-import { Alpenglow } from './presets/alpenglow';
-import { recordLife, directLifecycle, hasLife } from './lifecycle';
 
 const renderer = new THREE.WebGLRenderer({ antialias: false, powerPreference: 'high-performance' });
 renderer.setPixelRatio(Math.min(devicePixelRatio, 1.5));
@@ -21,7 +19,7 @@ renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.toneMappingExposure = 0.9;
 document.getElementById('stage')!.appendChild(renderer.domElement);
 
-const presets: Preset[] = [new Highway(), new Validators(), new Spectrum(), new City(), new Alpenglow()];
+const presets: Preset[] = [new Highway(), new Validators(), new Spectrum(), new City()];
 let active = presets[0];
 
 const post = new Post(renderer, active.scene, active.camera);
@@ -95,11 +93,9 @@ function fire(t: Trade, slot: number) {
   }
 }
 
-connectFeed((b) => timeline.push(b), (up) => hud.status(up), recordLife);
-// Local dev against a server without the lifecycle relay: subscribe directly
-if (/^(localhost|127\.0\.0\.1)$/.test(location.hostname)) setTimeout(() => { if (!hasLife()) directLifecycle(`ws://${location.host}/rpc-ws`); }, 4000);
+connectFeed((b) => timeline.push(b), (up) => hud.status(up));
 
-// --- Preset switching: keys 1-5, [ ], A for auto-cycle, ?p= deep link ---
+// --- Preset switching: keys 1-4, [ ], A for auto-cycle, ?p= deep link ---
 function use(i: number) {
   active.deactivate?.();
   active = presets[(i + presets.length) % presets.length];

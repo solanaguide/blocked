@@ -2,8 +2,6 @@
 export const config = {
   // Current max compute units per block; changes with network upgrades
   blockCuLimit: parseInt(process.env.BLOCK_CU_LIMIT || '60000000', 10),
-  // RPC websocket with slotsUpdatesSubscribe enabled, for per-slot consensus timing
-  slotUpdatesWs: process.env.SLOT_UPDATES_WS || 'wss://api.mainnet-beta.solana.com',
   redis: {
     host: process.env.REDIS_HOST || 'localhost',
     port: parseInt(process.env.REDIS_PORT || '6379', 10),
