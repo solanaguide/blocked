@@ -4,6 +4,9 @@ import type { Stats } from '../stats';
 import type { Preset, Frame, Kpi } from './types';
 import { LIMITS, fmtInt } from '../palette';
 import { Callouts } from '../callouts';
+import { TextSprite } from '../world/labels';
+import { validatorName } from '../validators';
+import { short } from '../hud';
 import { consensus, finalityMs, consensusMs, kindShare, type Consensus } from '../consensus';
 
 const LOW = typeof matchMedia !== 'undefined' && matchMedia('(max-width: 900px)').matches;
@@ -283,6 +286,22 @@ function terrain(x: number, z: number) {
   return massif * Math.pow(ridged(x * 0.022, z * 0.022), 1.4) * 1.2;
 }
 
+/** The block's trades, in order, across the visible width: smooth, gently biased heights */
+const PROFILE_W = 42;
+function profileAt(p: number[], x: number) {
+  const u = (x + PROFILE_W) / (2 * PROFILE_W) * (p.length - 1);
+  if (u <= 0 || u >= p.length - 1) {
+    // Fade back to neutral outside the band the camera watches
+    const out = u <= 0 ? -u : u - (p.length - 1);
+    const edge = u <= 0 ? p[0] : p[p.length - 1];
+    return 1 + (edge - 1) * Math.max(0, 1 - out / 2);
+  }
+  const i = Math.floor(u), f = u - i, k = (1 - Math.cos(f * Math.PI)) / 2;
+  return p[i] * (1 - k) + p[i + 1] * k;
+}
+
+interface Flag { group: THREE.Group; pennant: THREE.MeshBasicMaterial; label: TextSprite; slot: number; range?: Range; at: THREE.Vector3 }
+
 /** Same ground-emergence as the terrain shader, for things placed on summits */
 function growAt(z: number) {
   const t = Math.min(1, Math.max(0, (z - (Z0 + 0.5)) / (-5.5)));
@@ -323,10 +342,11 @@ export class Alpenglow implements Preset {
   private raysPulse = 0;
   readonly feed = 'windows';
   readonly legend = `
-    each slice = a block · height = compute<br>
-    pink touch = notarized<i style="background:#ff80b8"></i><br>
-    sunlight sweep = finalized<i style="background:#ff3a64"></i><br>
-    glint = one node sees it final<i style="background:#ffc0d0"></i>`;
+    slice = block · height = compute<br>
+    massif = a leader's 4 blocks, flagged<br>
+    peaks across = its trades in order<br>
+    pink = notarized<i style="background:#ff80b8"></i> sweep = final<i style="background:#ff3a64"></i><br>
+    glint = first nodes to see it final`;
 
   private ranges: Range[] = [];
   private index: THREE.BufferAttribute;
@@ -343,6 +363,9 @@ export class Alpenglow implements Preset {
   private tmp = new THREE.Vector3();
   private sun = new THREE.Vector3(-0.8, 0.12, -0.6).normalize();
   private prevAmp?: number;
+  private prevProf?: number[];
+  private volRef = 2000;          // rolling typical per-segment trade volume, USD
+  private flags: Flag[] = [];
   private present = new Map<number, boolean>();   // slot → produced a block
   private tape?: HTMLCanvasElement;
   private sunLight = new THREE.DirectionalLight();
@@ -491,8 +514,11 @@ export class Alpenglow implements Preset {
     // Recycle the oldest slice. A skipped slot still gets one: a low, unlit saddle
     const r = this.ranges.reduce((a, b) => (a.slot < b.slot ? a : b));
     const amp = block ? 7 + 14 * Math.min(1, block.cu / LIMITS.cu) : 2;
-    this.build(r, slot, this.prevAmp ?? amp, amp, !block);
+    const prof = block ? this.tradeProfile(block) : [1, 1, 1, 1, 1];
+    this.build(r, slot, this.prevAmp ?? amp, amp, !block, this.prevProf ?? prof, prof);
     this.prevAmp = amp;
+    this.prevProf = prof;
+    if (block && slot % 4 === 0) this.plantFlag(r, slot, block.leader);
   }
 
   /**
@@ -500,12 +526,17 @@ export class Alpenglow implements Preset {
    * ridge line to its own. The noise lives in world space, so slices join
    * seamlessly; height eases between the two blocks' compute.
    */
-  private build(r: Range, slot: number, ampPrev: number, amp: number, skipped: boolean) {
+  private build(r: Range, slot: number, ampPrev: number, amp: number, skipped: boolean, profPrev: number[], prof: number[]) {
     const zBase = (slot % 1_000_000) * D;
+    // A col between leader windows, so each leader's four blocks form one massif
+    const colBack = slot % 4 === 0, colFront = (slot + 1) % 4 === 0;
     const height = (x: number, zl: number) => {
       const t = (zl + D) / D;
-      const a = ampPrev + (amp - ampPrev) * t * t * (3 - 2 * t);
-      return a * terrain(x, zBase + zl) - 0.4;
+      const e = t * t * (3 - 2 * t);
+      const a = ampPrev + (amp - ampPrev) * e;
+      const col = 1 - (colBack ? 0.55 * Math.exp(-((t / 0.5) ** 2)) : 0) - (colFront ? 0.55 * Math.exp(-(((1 - t) / 0.5) ** 2)) : 0);
+      const trades = profileAt(profPrev, x) * (1 - e) + profileAt(prof, x) * e;
+      return a * col * trades * terrain(x, zBase + zl) - 0.4;
     };
     const pos = r.mesh.geometry.getAttribute('position') as THREE.BufferAttribute;
     const nor = r.mesh.geometry.getAttribute('normal') as THREE.BufferAttribute;
@@ -547,6 +578,66 @@ export class Alpenglow implements Preset {
     r.sparked = new Set();
     r.called = false;
     r.u.uH.value = r.h;
+  }
+
+  /** Five segments of the block by trade order → height bias 0.72..1.38 against the recent typical */
+  private tradeProfile(b: Block) {
+    const seg = [0, 0, 0, 0, 0];
+    for (const t of b.trades) seg[Math.min(4, Math.floor(t.order * 5))] += t.usd;
+    for (const v of seg) this.volRef += (Math.max(v, 1) - this.volRef) * 0.02;
+    return seg.map((v, i) => {
+      const r = Math.log1p(v / Math.max(1, this.volRef)) / Math.log(3);
+      return 0.72 + 0.66 * Math.min(1, r) + (hash(b.slot * 7 + i) - 0.5) * 0.08;
+    });
+  }
+
+  private plantFlag(r: Range, slot: number, leader: string) {
+    let fl = this.flags.find((f) => !f.range || f.range.slot !== f.slot || f.slot < slot - HIST);
+    if (!fl) {
+      if (this.flags.length >= Math.ceil(HIST / 4) + 2) return;
+      const group = new THREE.Group();
+      const pole = new THREE.Line(
+        new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0, 0, 0), new THREE.Vector3(0, 2.4, 0)]),
+        new THREE.LineBasicMaterial({ color: '#d8d4f0', transparent: true, opacity: 0.8 }),
+      );
+      const tri = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0, 2.4, 0), new THREE.Vector3(0, 1.85, 0), new THREE.Vector3(0.95, 2.12, 0)]);
+      const pennant = new THREE.MeshBasicMaterial({ color: '#8a8fb8', side: THREE.DoubleSide, toneMapped: false, transparent: true });
+      group.add(pole, new THREE.Mesh(tri, pennant));
+      const label = new TextSprite(0.62, 48, { glow: 0.05 });
+      (label.sprite.material as THREE.SpriteMaterial).depthTest = true;
+      label.sprite.position.y = 2.55;
+      group.add(label.sprite);
+      this.scene.add(group);
+      fl = { group, pennant, label, slot: -1, at: new THREE.Vector3() };
+      this.flags.push(fl);
+    }
+    fl.slot = slot;
+    fl.range = r;
+    fl.at.copy(r.route ?? r.anchors[0] ?? new THREE.Vector3());
+    let name = validatorName(leader) ?? short(leader);
+    if (name.length > 18) name = name.slice(0, 17) + '…';
+    fl.label.set([{ text: name, color: '#f2ecff' }]);
+  }
+
+  /** Flags ride their massif; the pennant turns rose once all four of the leader's blocks are final */
+  private updateFlags(playhead: number) {
+    for (const fl of this.flags) {
+      const r = fl.range;
+      if (!r || r.slot !== fl.slot) { fl.group.visible = false; continue; }
+      const z = r.mesh.position.z + fl.at.z;
+      const emerged = growAt(z);
+      if (emerged < 0.95 || z < -150) { fl.group.visible = false; continue; }
+      fl.group.visible = true;
+      fl.group.position.set(fl.at.x, fl.at.y * emerged, z);
+      let final = 0;
+      for (let k = 0; k < 4; k++) {
+        const c = consensus(fl.slot + k);
+        if (c?.finalized !== undefined && (playhead - (fl.slot + k) - 1) * this.slotMs >= c.finalized) final++;
+      }
+      fl.pennant.color.set(final === 4 ? '#ff5c86' : final > 0 ? '#c890b0' : '#8a8fb8');
+      const dist = this.camera.position.distanceTo(fl.group.position);
+      fl.label.opacity = Math.max(0, Math.min(1, (95 - dist) / 30));
+    }
   }
 
   trade() { /* this view is about consensus, not markets */ }
@@ -604,6 +695,7 @@ export class Alpenglow implements Preset {
     this.callouts.visible = !portrait;
     this.callouts.update(this.camera, this.w, this.h);
 
+    this.updateFlags(f.playhead);
     this.drawTape(f.playhead);
 
     // Light shafts from the low sun, swelling briefly each time a block finalizes
@@ -691,7 +783,9 @@ export class Alpenglow implements Preset {
 
   /** One sparkle per node, on its own summit, when that node saw the stage */
   private sparkle(r: Range, c: Consensus, since: number) {
-    c.nodes.forEach((n, i) => {
+    // Only the first few nodes to see it final, so more observers don't mean more clutter
+    const first = c.nodes.filter((n) => n.f !== undefined).sort((a, b) => a.f! - b.f!).slice(0, 4);
+    first.forEach((n, i) => {
       const a = r.anchors[i % Math.max(1, r.anchors.length)];
       if (!a) return;
       for (const [stage, ms, color, size] of [['f', n.f, '#ffd0e0', 0.9]] as const) {
@@ -713,7 +807,7 @@ export class Alpenglow implements Preset {
 
   private callout(r: Range, c: Consensus, now: number) {
     r.called = true;
-    if (r.slot % 20 !== 0 || !r.route || c.finalized === undefined) return;
+    if (r.slot % 25 !== 0 || !r.route || c.finalized === undefined) return;
     this.calloutAt = now;
     const a = r.route.clone().setY(r.route.y + 0.6);
     const slot = r.slot;
