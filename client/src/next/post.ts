@@ -5,28 +5,29 @@ import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPa
 import { ShaderPass } from 'three/examples/jsm/postprocessing/ShaderPass.js';
 import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
 
-// Light CRT finish: chromatic fringing toward the edges, scanlines, vignette, grain
+// Light CRT finish: chromatic fringing toward the edges, scanlines, vignette, grain.
+// `crt` scales the retro parts; at 0 it's a clean film finish (vignette + fine grain)
 const CRT = {
-  uniforms: { tDiffuse: { value: null }, time: { value: 0 }, res: { value: new THREE.Vector2() }, glitch: { value: 0 } },
+  uniforms: { tDiffuse: { value: null }, time: { value: 0 }, res: { value: new THREE.Vector2() }, glitch: { value: 0 }, crt: { value: 1 } },
   vertexShader: `varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }`,
   fragmentShader: `
-    uniform sampler2D tDiffuse; uniform float time; uniform vec2 res; uniform float glitch; varying vec2 vUv;
+    uniform sampler2D tDiffuse; uniform float time; uniform vec2 res; uniform float glitch; uniform float crt; varying vec2 vUv;
     float rnd(vec2 p){ return fract(sin(dot(p, vec2(12.9898,78.233))) * 43758.5453); }
     void main(){
       vec2 uv = vUv;
       // occasional horizontal tear on glitch
       float band = step(0.985, rnd(vec2(floor(uv.y * 40.0), floor(time * 20.0))));
-      uv.x += glitch * band * (rnd(vec2(time, uv.y)) - 0.5) * 0.06;
+      uv.x += glitch * crt * band * (rnd(vec2(time, uv.y)) - 0.5) * 0.06;
       vec2 c = uv - 0.5;
-      float ca = 0.0004 + dot(c, c) * 0.0022 + glitch * 0.006;
+      float ca = (0.0004 + dot(c, c) * 0.0022 + glitch * 0.006) * crt;
       vec3 col;
       col.r = texture2D(tDiffuse, uv + c * ca * 4.0).r;
       col.g = texture2D(tDiffuse, uv).g;
       col.b = texture2D(tDiffuse, uv - c * ca * 4.0).b;
-      float scan = 0.94 + 0.06 * sin(vUv.y * res.y * 1.5);
+      float scan = 1.0 - crt * (0.06 - 0.06 * sin(vUv.y * res.y * 1.5));
       col *= scan;
-      col *= 1.0 - smoothstep(0.35, 0.95, length(c * vec2(1.0, 1.15)));
-      col += (rnd(vUv * res + time) - 0.5) * 0.025;
+      col *= 1.0 - mix(0.55, 1.0, crt) * smoothstep(0.35, 0.95, length(c * vec2(1.0, 1.15)));
+      col += (rnd(vUv * res + time) - 0.5) * mix(0.012, 0.025, crt);
       gl_FragColor = vec4(col, 1.0);
     }`,
 };
@@ -48,7 +49,8 @@ export class Post {
     this.composer.addPass(new OutputPass());
   }
 
-  use(scene: THREE.Scene, camera: THREE.Camera, bloom: [number, number, number]) {
+  use(scene: THREE.Scene, camera: THREE.Camera, bloom: [number, number, number], crt = 1) {
+    this.crt.uniforms.crt.value = crt;
     this.pass.scene = scene;
     this.pass.camera = camera;
     [this.bloom.strength, this.bloom.radius, this.bloom.threshold] = bloom;

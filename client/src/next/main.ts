@@ -13,7 +13,7 @@ import { Validators } from './presets/validators';
 import { Spectrum } from './presets/spectrum';
 import { City } from './presets/city';
 import { Alpenglow } from './presets/alpenglow';
-import { recordLife, directLifecycle, hasLife } from './lifecycle';
+import { recordConsensus, connectConsensus } from './consensus';
 
 const renderer = new THREE.WebGLRenderer({ antialias: false, powerPreference: 'high-performance' });
 renderer.setPixelRatio(Math.min(devicePixelRatio, 1.5));
@@ -95,16 +95,16 @@ function fire(t: Trade, slot: number) {
   }
 }
 
-connectFeed((b) => timeline.push(b), (up) => hud.status(up), recordLife);
-// Local dev against a server without the lifecycle relay: subscribe directly
-if (/^(localhost|127\.0\.0\.1)$/.test(location.hostname)) setTimeout(() => { if (!hasLife()) directLifecycle(`ws://${location.host}/rpc-ws`); }, 4000);
+connectFeed((b) => timeline.push(b), (up) => hud.status(up), recordConsensus);
+// Local dev: prod blocks plus consensus from the local relay (npm run dev:consensus)
+if (/^(localhost|127\.0\.0\.1)$/.test(location.hostname)) connectConsensus(`ws://${location.host}/consensus-ws`);
 
 // --- Preset switching: keys 1-5, [ ], A for auto-cycle, ?p= deep link ---
 function use(i: number) {
   active.deactivate?.();
   active = presets[(i + presets.length) % presets.length];
   active.activate?.();
-  post.use(active.scene, active.camera, active.bloom);
+  post.use(active.scene, active.camera, active.bloom, active.crt ?? 1);
   active.resize(innerWidth, innerHeight);
   hud.usePreset(active.id, active.title, active.legend, active.feed, presets.indexOf(active), presets.length);
   hud.kpis(active.kpis(stats));

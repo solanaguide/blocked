@@ -13,7 +13,8 @@
     "test:visual:after": "BASELINE_DIR=after npm run test:visual",
     "test:visual:before": "BASELINE_DIR=before npm run test:visual",
     "test:visual:compare": "bash tests/visual/capture-before-after.sh",
-    "test:visual:report": "npx reg-cli tests/visual/baselines/before tests/visual/baselines/after tests/visual/reports/diff --report tests/visual/reports/index.html --json tests/visual/reports/results.json --threshold 0.1"
+    "test:visual:report": "npx reg-cli tests/visual/baselines/before tests/visual/baselines/after tests/visual/reports/diff --report tests/visual/reports/index.html --json tests/visual/reports/results.json --threshold 0.1",
+    "dev:consensus": "tsx server/dev-consensus.ts"
   },
   "dependencies": {
     "cors": "^2.8.5",

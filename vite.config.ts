@@ -15,14 +15,8 @@ export default defineConfig({
         target: 'ws://localhost:8080',
         ws: true,
       },
-      // Dev only: public RPC rejects browser origins, so relay slot updates without one
-      '/rpc-ws': {
-        target: 'wss://api.mainnet-beta.solana.com',
-        ws: true,
-        changeOrigin: true,
-        rewrite: () => '/',
-        configure: (proxy) => proxy.on('proxyReqWs', (req) => req.removeHeader('origin')),
-      },
+      // Dev only: local consensus relay (npm run dev:consensus)
+      '/consensus-ws': { target: 'ws://localhost:8091', ws: true },
       '/api': {
         target: 'https://live.solanacompass.com',
         changeOrigin: true,

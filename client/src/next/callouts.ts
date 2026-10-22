@@ -12,6 +12,7 @@ interface Callout {
   dy: number;
   born: number;
   life: number;      // ms; Infinity for persistent
+  side?: number;     // force labels left (-1) or right (1) of their anchor
 }
 
 export class Callouts {
@@ -20,14 +21,14 @@ export class Callouts {
   private items: Callout[] = [];
   private v = new THREE.Vector3();
 
-  add(anchor: () => THREE.Vector3 | null, html: string, opts: { life?: number; dx?: number; dy?: number; cls?: string } = {}) {
+  add(anchor: () => THREE.Vector3 | null, html: string, opts: { life?: number; dx?: number; dy?: number; cls?: string; side?: number } = {}) {
     const el = document.createElement('div');
     el.className = 'callout ' + (opts.cls ?? '');
     el.innerHTML = html;
     this.root.appendChild(el);
     const line = document.createElementNS('http://www.w3.org/2000/svg', 'polyline');
     this.svg.appendChild(line);
-    const c: Callout = { el, line, anchor, dx: opts.dx ?? 60, dy: opts.dy ?? -50, born: performance.now(), life: opts.life ?? 5000 };
+    const c: Callout = { el, line, anchor, dx: opts.dx ?? 60, dy: opts.dy ?? -50, born: performance.now(), life: opts.life ?? 5000, side: opts.side };
     this.items.push(c);
     return c;
   }
@@ -57,7 +58,7 @@ export class Callouts {
       const behind = this.v.z > 1;
       const x = (this.v.x * 0.5 + 0.5) * w, y = (-this.v.y * 0.5 + 0.5) * h;
       // Labels lean away from the screen centre so they don't pile onto the subject
-      const dx = x < w / 2 ? -Math.abs(c.dx) : Math.abs(c.dx);
+      const dx = (c.side ?? (x < w / 2 ? -1 : 1)) * Math.abs(c.dx);
       const lx = x + dx, ly = y + c.dy;
       const fade = Number.isFinite(c.life) ? Math.min(1, age * 12) * (1 - Math.pow(age, 4)) : 1;
       const alpha = behind || x < -50 || x > w + 50 || y < -50 || y > h + 50 ? 0 : fade;
