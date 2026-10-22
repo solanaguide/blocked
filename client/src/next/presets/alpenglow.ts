@@ -9,9 +9,9 @@ import { consensus, finalityMs, consensusMs, kindShare, type Consensus } from '.
 const LOW = typeof matchMedia !== 'undefined' && matchMedia('(max-width: 900px)').matches;
 const D = 2.6;                 // depth between neighbouring blocks' ranges
 const Z0 = 2;                  // where the newest range stands
-const HIST = LOW ? 50 : 80;    // ranges kept, receding into haze
+const HIST = LOW ? 44 : 64;    // ranges kept, receding into haze
 const HALF_W = 150;            // ranges span the whole horizon
-const NX = LOW ? 200 : 340;
+const NX = LOW ? 180 : 260;
 const NZ = 9;                  // rows across one block's slice of terrain
 const ANCHORS = 16;            // summits where node sparkles can land
 const SPARKS = 96;
@@ -78,9 +78,10 @@ const NOISE_GLSL = /* glsl */ `
   }
   float fbm3(vec3 p) {
     float s = 0.0, a = 0.5;
-    for (int i = 0; i < ${LOW ? 2 : 4}; i++) { s += a * vnoise(p); p *= 2.03; a *= 0.5; }
+    for (int i = 0; i < ${LOW ? 2 : 3}; i++) { s += a * vnoise(p); p *= 2.03; a *= 0.5; }
     return s;
   }
+  float fbm2(vec3 p) { return 0.5 * vnoise(p) + 0.25 * vnoise(p * 2.03); }
 `;
 
 // Shared atmosphere: twilight haze, warmed toward the low sun on the left
@@ -148,7 +149,7 @@ const MIST_FRAG = /* glsl */ `
   ${ATMOS_GLSL}
   void main() {
     vec3 q = vec3(vWorld.x * 0.03 + uTime * 0.025, uTime * 0.015, vWorld.z * 0.05);
-    float n = fbm3(q);
+    float n = fbm2(q);
     vec3 dir = normalize(vWorld - cameraPosition);
     float toSun = max(dot(dir, normalize(vec3(uSun.x, 0.0, uSun.z))), 0.0);
     float a = smoothstep(0.45, 0.8, n) * 0.4 * smoothstep(10.0, 35.0, length(vWorld - cameraPosition));
@@ -200,7 +201,9 @@ function terrainMaterial(u: TerrainUniforms) {
         ${ATMOS_GLSL}`)
       .replace('#include <color_fragment>', `#include <color_fragment>
         vec3 pN = vWorldP * vec3(0.5, 1.0, 0.5);
-        float f0 = fbm3(pN);
+        float camDist = length(vWorldP - cameraPosition);
+        bool nearDetail = camDist < 90.0;
+        float f0 = nearDetail ? fbm3(pN) : fbm2(pN);
         float slope = 1.0 - normalize(vWorldN).y;
         float yn = clamp(vLocalY / uH, 0.0, 1.2);
         float snowM = smoothstep(0.44, 0.27, slope + (f0 - 0.5) * 0.3) * smoothstep(0.02, 0.14, yn);
@@ -210,9 +213,11 @@ function terrainMaterial(u: TerrainUniforms) {
       .replace('#include <roughnessmap_fragment>', `#include <roughnessmap_fragment>
         roughnessFactor = mix(0.92, 0.55, snowM);`)
       .replace('#include <normal_fragment_maps>', `#include <normal_fragment_maps>
-        const float be = 0.15;
-        vec2 bg = vec2(fbm3(pN + vec3(be, 0.0, 0.0)) - f0, fbm3(pN + vec3(0.0, 0.0, be)) - f0) / be;
-        normal = normalize(normal - (viewMatrix * vec4(bg.x, 0.0, bg.y, 0.0)).xyz * 0.35);`)
+        if (nearDetail) {
+          const float be = 0.15;
+          vec2 bg = vec2(fbm2(pN + vec3(be, 0.0, 0.0)) - fbm2(pN), fbm2(pN + vec3(0.0, 0.0, be)) - fbm2(pN)) / be;
+          normal = normalize(normal - (viewMatrix * vec4(bg.x, 0.0, bg.y, 0.0)).xyz * 0.35 * (1.0 - camDist / 90.0));
+        }`)
       .replace('#include <lights_fragment_end>', `#include <lights_fragment_end>
         // Has the sunlight reached this slice yet?
         float litN = smoothstep(0.84, 0.95, yn) * uNotar;
@@ -302,6 +307,11 @@ export class Alpenglow implements Preset {
   readonly camera = new THREE.PerspectiveCamera(42, 1, 0.1, 2000);
   readonly bloom: [number, number, number] = [0.55, 0.7, 0.72];
   readonly crt = 0;
+  maxDpr = 1;
+  private ft = 16;           // smoothed frame time, ms
+  private quality = 3;       // 3 full · 2 lower res · 1 no light shafts · 0 no shadows
+  private qAt = 0;
+  private frameN = 0;
   readonly rays = { uv: new THREE.Vector2(), strength: 0 };
   private raysPulse = 0;
   readonly feed = 'windows';
@@ -385,7 +395,8 @@ export class Alpenglow implements Preset {
     this.sunLight.color.set('#ff5a74');
     this.sunLight.intensity = 9;
     this.sunLight.castShadow = true;
-    this.sunLight.shadow.mapSize.setScalar(LOW ? 2048 : 4096);
+    this.sunLight.shadow.mapSize.setScalar(LOW ? 1024 : 2048);
+    this.sunLight.shadow.autoUpdate = false;
     const sc = this.sunLight.shadow.camera;
     sc.left = -130; sc.right = 130; sc.top = 130; sc.bottom = -130; sc.near = 10; sc.far = 900;
     this.sunLight.shadow.bias = -0.0015;
@@ -527,6 +538,9 @@ export class Alpenglow implements Preset {
 
   update(f: Frame) {
     this.playhead = f.playhead;
+    // Terrain scrolls slowly enough that shadows can refresh every other frame
+    if (++this.frameN % 2 === 0 && this.quality > 0) this.sunLight.shadow.needsUpdate = true;
+    this.govern(f.dt);
     if (f.timeline.slotsPerSec > 0) this.slotMs = 1000 / f.timeline.slotsPerSec;
     const now = performance.now();
     (this.sky.material as THREE.ShaderMaterial).uniforms.uTime.value = f.t;
@@ -575,8 +589,27 @@ export class Alpenglow implements Preset {
     this.tmp.copy(this.camera.position).addScaledVector(this.sun, 1000).project(this.camera);
     this.rays.uv.set(this.tmp.x * 0.5 + 0.5, this.tmp.y * 0.5 + 0.5);
     this.raysPulse *= Math.exp(-f.dt / 0.5);
-    this.rays.strength = this.tmp.z < 1 ? 0.45 + this.raysPulse * 0.5 : 0;
+    this.rays.strength = this.tmp.z < 1 && this.quality > 1 ? 0.45 + this.raysPulse * 0.5 : 0;
   }
+
+  /**
+   * Keep the scene smooth on modest GPUs: if frames run long for a couple of
+   * seconds, step quality down (resolution, then light shafts, then shadows).
+   */
+  private govern(dt: number) {
+    this.ft += (dt * 1000 - this.ft) * 0.05;
+    const now = performance.now();
+    if (now - this.qAt < 2500 || this.quality === 0 || this.ft < 22) return;
+    this.qAt = now;
+    this.quality--;
+    if (this.quality === 2) this.maxDpr = 0.75;
+    if (this.quality === 1) this.rays.strength = 0;
+    if (this.quality === 0) { this.sunLight.castShadow = false; this.scene.traverse((o) => { if ((o as THREE.Mesh).isMesh) (o as THREE.Mesh).receiveShadow = false; }); }
+    this.onQuality?.();
+  }
+
+  /** Engine hook so a lower pixel ratio takes effect */
+  onQuality?: () => void;
 
   /** One sparkle per node, on its own summit, when that node saw the stage */
   private sparkle(r: Range, c: Consensus, since: number) {

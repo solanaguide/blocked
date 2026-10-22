@@ -40,9 +40,10 @@ const RAYS = {
     uniform sampler2D tDiffuse; uniform vec2 uSun; uniform float uStrength; uniform vec3 uTint; varying vec2 vUv;
     void main(){
       vec3 base = texture2D(tDiffuse, vUv).rgb;
-      const int N = 48;
+      const int N = 24;
       vec2 stepv = (vUv - uSun) / float(N) * 0.85;
-      vec2 uv = vUv;
+      // Per-pixel jitter hides the banding from so few samples
+      vec2 uv = vUv - stepv * fract(sin(dot(vUv, vec2(12.9898, 78.233))) * 43758.5453);
       float illum = 1.0;
       vec3 acc = vec3(0.0);
       for (int i = 0; i < N; i++) {
@@ -51,7 +52,7 @@ const RAYS = {
         vec3 c = texture2D(tDiffuse, uv).rgb;
         float l = max(max(c.r, max(c.g, c.b)) - 0.68, 0.0);
         acc += c * l * illum;
-        illum *= 0.962;
+        illum *= 0.93;
       }
       gl_FragColor = vec4(base + acc * uTint * (uStrength / float(N)), 1.0);
     }`,

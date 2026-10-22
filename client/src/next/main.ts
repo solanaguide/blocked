@@ -108,6 +108,7 @@ function use(i: number) {
   active = presets[(i + presets.length) % presets.length];
   active.activate?.();
   post.use(active.scene, active.camera, active.bloom, active.crt ?? 1, active.rays);
+  applyDpr();
   active.resize(innerWidth, innerHeight);
   hud.usePreset(active.id, active.title, active.legend, active.feed, presets.indexOf(active), presets.length);
   hud.kpis(active.kpis(stats));
@@ -158,6 +159,13 @@ document.getElementById('next')!.addEventListener('click', () => use(presets.ind
 
 const pointer = new THREE.Vector2();
 addEventListener('pointermove', (e) => pointer.set(e.clientX / innerWidth - 0.5, e.clientY / innerHeight - 0.5));
+
+// Heavy scenes render at a lower pixel ratio, and may lower it further themselves
+function applyDpr() {
+  const dpr = Math.min(devicePixelRatio, active.maxDpr ?? 1.5);
+  if (renderer.getPixelRatio() !== dpr) { renderer.setPixelRatio(dpr); resize(); }
+}
+for (const p of presets) p.onQuality = () => { if (p === active) applyDpr(); };
 
 function resize() {
   const w = innerWidth, h = innerHeight;
