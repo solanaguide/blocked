@@ -13,7 +13,6 @@ import { Validators } from './presets/validators';
 import { Spectrum } from './presets/spectrum';
 import { City } from './presets/city';
 import { Alpenglow } from './presets/alpenglow';
-import { Finality } from './presets/finality';
 import { recordConsensus, connectConsensus } from './consensus';
 
 const renderer = new THREE.WebGLRenderer({ antialias: false, powerPreference: 'high-performance' });
@@ -25,7 +24,8 @@ renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 document.getElementById('stage')!.appendChild(renderer.domElement);
 
-const presets: Preset[] = [new Highway(), new Validators(), new Spectrum(), new City(), new Alpenglow(), new Finality()];
+// Finality map is still in development: not registered until it earns its place
+const presets: Preset[] = [new Highway(), new Validators(), new Spectrum(), new City(), new Alpenglow()];
 let active = presets[0];
 
 const post = new Post(renderer, active.scene, active.camera);
