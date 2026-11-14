@@ -20,7 +20,14 @@ const redisSubscriber = new RedisSubscriber();
 
 interface ClientState {
   channels: Set<string>;
+  // Optional field allowlist: when set, outgoing messages are trimmed to these
+  // top-level keys (plus `type`/`interval`). Lets constrained clients (e.g. ESP32)
+  // receive small payloads.
+  fields?: string[];
 }
+
+const MAX_FIELDS = 64;
+const ALWAYS_FIELDS = ['type', 'interval'];
 
 const clients = new Map<WebSocket, ClientState>();
 let redisConnected = false;
@@ -146,10 +153,17 @@ wss.on('connection', (ws, req) => {
         const channels = new Set<string>(
           msg.channels.filter((c: string) => validSet.has(c))
         );
-        if (channels.size > 0) {
-          const state = clients.get(ws);
-          if (state) state.channels = channels;
-          console.log(`WS subscribe [${clientIp}]: ${Array.from(channels).join(', ')}`);
+        const state = clients.get(ws);
+        if (state && channels.size > 0) state.channels = channels;
+        if (state && Array.isArray(msg.fields)) {
+          const fields = Array.from(new Set<string>(
+            msg.fields.filter((f: unknown) => typeof f === 'string' && f.length > 0 && f.length <= 64)
+          )).slice(0, MAX_FIELDS).sort();
+          state.fields = fields.length > 0 ? fields : undefined;
+        }
+        if (state) {
+          console.log(`WS subscribe [${clientIp}]: ${Array.from(state.channels).join(', ')}` +
+            (state.fields ? ` | fields: ${state.fields.join(',')}` : ''));
         }
       }
     } catch { /* ignore malformed messages */ }
@@ -167,12 +181,25 @@ wss.on('connection', (ws, req) => {
 });
 
 // Broadcast to subscribed clients
+function projectFields(message: any, fields: string[]): any {
+  const out: any = {};
+  for (const k of ALWAYS_FIELDS) if (k in message) out[k] = message[k];
+  for (const k of fields) if (k in message) out[k] = message[k];
+  return out;
+}
+
 function broadcast(message: any, channel: string = 'blocks') {
-  const data = JSON.stringify(message);
+  // Serialize once per distinct field set (full message keyed by '')
+  const cache = new Map<string, string>();
   for (const [ws, state] of clients) {
-    if (ws.readyState === WebSocket.OPEN && state.channels.has(channel)) {
-      ws.send(data);
+    if (ws.readyState !== WebSocket.OPEN || !state.channels.has(channel)) continue;
+    const key = state.fields ? state.fields.join(',') : '';
+    let data = cache.get(key);
+    if (data === undefined) {
+      data = JSON.stringify(state.fields ? projectFields(message, state.fields) : message);
+      cache.set(key, data);
     }
+    ws.send(data);
   }
 }
 
