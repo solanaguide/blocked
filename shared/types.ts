@@ -146,6 +146,14 @@ export interface WireBlockMessage extends BlockFields {
   tokenDex: WireTokenEntry[];
   programDex: WireProgramEntry[];
   trades: CompactTrade[];
+  leaderName?: string;  // validator display name, when known
+  topSwap?: TopSwap;    // the block's largest swap by USD volume
+}
+
+export interface TopSwap {
+  usd: number;     // volume USD (rounded)
+  symbol: string;  // traded token symbol (non-quote side), or short mint
+  dex: string;     // program display name
 }
 
 // --- Client-side (expanded) format ---

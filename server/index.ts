@@ -6,11 +6,12 @@ import { RedisSubscriber } from './redis-client.js';
 import { config } from './config.js';
 import { TokenResolver } from './token-resolver.js';
 import { programNames } from '../shared/program-names.js';
-import type { WireBlockMessage, WireTokenEntry, WireProgramEntry, CompactTrade, AggregationInterval, BlockFields } from '../shared/types.js';
+import type { TopSwap, WireBlockMessage, WireTokenEntry, WireProgramEntry, CompactTrade, AggregationInterval, BlockFields } from '../shared/types.js';
 import { VALID_INTERVALS } from '../shared/types.js';
 import { TimeAggregator } from './time-aggregator.js';
 import type { TradeSummary } from './time-aggregator.js';
 import { ConsensusFeed } from './consensus-feed.js';
+import { ValidatorNames } from './validator-names.js';
 
 const app = express();
 const server = createServer(app);
@@ -60,6 +61,9 @@ const networkCache: NetworkStateCache = {
 
 // Token name resolver (Jupiter API)
 const tokenResolver = new TokenResolver();
+
+// Validator identity → display name (Solana Compass)
+const validatorNames = new ValidatorNames();
 
 // Signature cache for redirect route: slot → full signatures array
 const sigCache = new Map<number, string[]>();
@@ -138,33 +142,53 @@ app.get('/api/aggregated/:interval', (req, res) => {
 // Serve static files (client build)
 app.use(express.static('dist/client'));
 
+// Apply a subscription (channels and/or field allowlist) to a client's state.
+// Used for both the connect URL query and later `subscribe` messages.
+const VALID_CHANNELS = new Set<string>(['blocks', ...VALID_INTERVALS]);
+function applySubscription(state: ClientState, channels: unknown, fields: unknown) {
+  if (Array.isArray(channels)) {
+    const valid = new Set<string>(channels.filter((c): c is string => typeof c === 'string' && VALID_CHANNELS.has(c)));
+    if (valid.size > 0) state.channels = valid;
+  }
+  if (Array.isArray(fields)) {
+    const list = Array.from(new Set<string>(
+      fields.filter((f): f is string => typeof f === 'string' && f.length > 0 && f.length <= 64)
+    )).slice(0, MAX_FIELDS).sort();
+    state.fields = list.length > 0 ? list : undefined;
+  }
+}
+
+function describe(state: ClientState): string {
+  return Array.from(state.channels).join(', ') + (state.fields ? ` | fields: ${state.fields.join(',')}` : '');
+}
+
+function serialize(message: any, state: ClientState): string {
+  return JSON.stringify(state.fields ? projectFields(message, state.fields) : message);
+}
+
 // WebSocket connection handler
 wss.on('connection', (ws, req) => {
   const clientIp = req.headers['x-forwarded-for'] || req.socket.remoteAddress;
-  console.log(`WS connect: ${clientIp} (${clients.size + 1} total)`);
-  clients.set(ws, { channels: new Set(['blocks']) });
-  for (const m of consensus.history()) ws.send(JSON.stringify(m));
+  const state: ClientState = { channels: new Set(['blocks']) };
+
+  // Subscription can be given up front in the URL (/ws?channels=blocks&fields=slot,leader)
+  // so constrained clients never receive a full-size message. Unknown params are ignored.
+  try {
+    const q = new URL(req.url ?? '/', 'http://localhost').searchParams;
+    const split = (v: string | null) => v === null ? undefined : v.split(',').map(x => x.trim()).filter(Boolean);
+    applySubscription(state, split(q.get('channels')), split(q.get('fields')));
+  } catch { /* ignore malformed URL */ }
+
+  clients.set(ws, state);
+  console.log(`WS connect: ${clientIp} (${clients.size} total) [${describe(state)}]`);
+  for (const m of consensus.history()) ws.send(serialize(m, state));
 
   ws.on('message', (raw) => {
     try {
       const msg = JSON.parse(raw.toString());
-      if (msg.type === 'subscribe' && Array.isArray(msg.channels)) {
-        const validSet = new Set<string>(['blocks', ...VALID_INTERVALS]);
-        const channels = new Set<string>(
-          msg.channels.filter((c: string) => validSet.has(c))
-        );
-        const state = clients.get(ws);
-        if (state && channels.size > 0) state.channels = channels;
-        if (state && Array.isArray(msg.fields)) {
-          const fields = Array.from(new Set<string>(
-            msg.fields.filter((f: unknown) => typeof f === 'string' && f.length > 0 && f.length <= 64)
-          )).slice(0, MAX_FIELDS).sort();
-          state.fields = fields.length > 0 ? fields : undefined;
-        }
-        if (state) {
-          console.log(`WS subscribe [${clientIp}]: ${Array.from(state.channels).join(', ')}` +
-            (state.fields ? ` | fields: ${state.fields.join(',')}` : ''));
-        }
+      if (msg.type === 'subscribe') {
+        applySubscription(state, msg.channels, msg.fields);
+        console.log(`WS subscribe [${clientIp}]: ${describe(state)}`);
       }
     } catch { /* ignore malformed messages */ }
   });
@@ -196,7 +220,7 @@ function broadcast(message: any, channel: string = 'blocks') {
     const key = state.fields ? state.fields.join(',') : '';
     let data = cache.get(key);
     if (data === undefined) {
-      data = JSON.stringify(state.fields ? projectFields(message, state.fields) : message);
+      data = serialize(message, state);
       cache.set(key, data);
     }
     ws.send(data);
@@ -390,6 +414,29 @@ function buildWireTrades(trades: AccumulatedTrade[], blockTimeSec: number): {
   return { tokenDex, programDex, compactTrades };
 }
 
+// Quote-side tokens: when a swap involves one of these, name the other side.
+const QUOTE_MINTS = new Set([
+  'So11111111111111111111111111111111111111112',  // SOL
+  'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v', // USDC
+  'Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB', // USDT
+]);
+
+function computeTopSwap(trades: AccumulatedTrade[]): TopSwap | undefined {
+  let top: AccumulatedTrade | undefined;
+  for (const t of trades) {
+    if (t.q === 2) continue; // skip wash trades
+    if (Number.isFinite(t.vu) && (!top || t.vu > top.vu)) top = t;
+  }
+  if (!top) return undefined;
+  const mint = QUOTE_MINTS.has(top.ta) && !QUOTE_MINTS.has(top.tb) ? top.tb : top.ta;
+  const symbol = tokenResolver.getTokenInfo(mint)?.symbol ?? mint.slice(0, 4);
+  return {
+    usd: Math.round(top.vu),
+    symbol,
+    dex: programNames[top.p] || top.p.slice(0, 4),
+  };
+}
+
 redisSubscriber.onBlock(async (rawBlock) => {
   const now = Date.now();
   const blockGap = now - lastBlockTime;
@@ -465,6 +512,8 @@ redisSubscriber.onBlock(async (rawBlock) => {
     tokenDex,
     programDex,
     trades: compactTrades,
+    leaderName: validatorNames.get(rawBlock.leader),
+    topSwap: computeTopSwap(trades),
   };
 
   // Feed block + trade summaries to time aggregator
@@ -487,6 +536,7 @@ async function start() {
 
     timeAggregator.start();
     consensus.start();
+    validatorNames.start();
 
     server.listen(config.websocket.port, () => {
       console.log(`Server started on port ${config.websocket.port}`);
