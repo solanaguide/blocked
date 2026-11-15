@@ -26,17 +26,25 @@ interface ClientState {
   // top-level keys (plus `type`/`interval`). Lets constrained clients (e.g. ESP32)
   // receive small payloads.
   fields?: string[];
+  // Whether this client gets consensus messages: true with no allowlist, or when
+  // the allowlist names at least one consensus field.
+  consensus: boolean;
 }
 
 const MAX_FIELDS = 64;
 const ALWAYS_FIELDS = ['type', 'interval'];
+const CONSENSUS_FIELDS = new Set(['n', 'd', 'v', 'nk', 'fk']);
+
+// Recent block messages (~30 s), replayed to clients that connect with ?since=<slot>
+const BLOCK_REPLAY = 150;
+const recentBlocks: WireBlockMessage[] = [];
 
 const clients = new Map<WebSocket, ClientState>();
 let redisConnected = false;
 const startTime = Date.now();
 
 const timeAggregator = new TimeAggregator();
-const consensus = new ConsensusFeed((m) => broadcast(m));
+const consensus = new ConsensusFeed((m) => broadcast(m, 'blocks', true));
 timeAggregator.onBucketComplete((interval, data) => {
   const price = solPrice.get();
   broadcast(price === undefined ? data : { ...data, solPrice: price }, interval);
@@ -161,6 +169,7 @@ function applySubscription(state: ClientState, channels: unknown, fields: unknow
     )).slice(0, MAX_FIELDS).sort();
     state.fields = list.length > 0 ? list : undefined;
   }
+  state.consensus = !state.fields || state.fields.some(f => CONSENSUS_FIELDS.has(f));
 }
 
 function describe(state: ClientState): string {
@@ -174,7 +183,8 @@ function serialize(message: any, state: ClientState): string {
 // WebSocket connection handler
 wss.on('connection', (ws, req) => {
   const clientIp = req.headers['x-forwarded-for'] || req.socket.remoteAddress;
-  const state: ClientState = { channels: new Set(['blocks']) };
+  const state: ClientState = { channels: new Set(['blocks']), consensus: true };
+  let since: number | undefined;
 
   // Subscription can be given up front in the URL (/ws?channels=blocks&fields=slot,leader)
   // so constrained clients never receive a full-size message. Unknown params are ignored.
@@ -182,11 +192,24 @@ wss.on('connection', (ws, req) => {
     const q = new URL(req.url ?? '/', 'http://localhost').searchParams;
     const split = (v: string | null) => v === null ? undefined : v.split(',').map(x => x.trim()).filter(Boolean);
     applySubscription(state, split(q.get('channels')), split(q.get('fields')));
+    const s = q.get('since');
+    if (s !== null && /^\d+$/.test(s.trim())) since = Number(s.trim());
   } catch { /* ignore malformed URL */ }
 
+  // Replay missed blocks (slot > since, in slot order) before the live stream.
+  // Sent synchronously before the client joins `clients`, so no duplicates.
+  let replayed = 0;
+  if (since !== undefined && state.channels.has('blocks') && since < networkCache.lastBlockSlot) {
+    const missed = recentBlocks.filter(b => b.slot > since!).sort((a, b) => a.slot - b.slot);
+    for (const b of missed) ws.send(serialize(b, state));
+    replayed = missed.length;
+  }
+
   clients.set(ws, state);
-  console.log(`WS connect: ${clientIp} (${clients.size} total) [${describe(state)}]`);
-  for (const m of consensus.history()) ws.send(serialize(m, state));
+  console.log(`WS connect: ${clientIp} (${clients.size} total) [${describe(state)}]${since !== undefined ? ` since=${since} replayed=${replayed}` : ''}`);
+  if (state.consensus && state.channels.has('blocks')) {
+    for (const m of consensus.history()) ws.send(serialize(m, state));
+  }
 
   ws.on('message', (raw) => {
     try {
@@ -217,11 +240,12 @@ function projectFields(message: any, fields: string[]): any {
   return out;
 }
 
-function broadcast(message: any, channel: string = 'blocks') {
+function broadcast(message: any, channel: string = 'blocks', isConsensus = false) {
   // Serialize once per distinct field set (full message keyed by '')
   const cache = new Map<string, string>();
   for (const [ws, state] of clients) {
     if (ws.readyState !== WebSocket.OPEN || !state.channels.has(channel)) continue;
+    if (isConsensus && !state.consensus) continue;
     const key = state.fields ? state.fields.join(',') : '';
     let data = cache.get(key);
     if (data === undefined) {
@@ -531,6 +555,8 @@ redisSubscriber.onBlock(async (rawBlock) => {
   timeAggregator.ingestBlock(blockFields as BlockFields, tradeSummaries);
 
   lastBlockTime = now;
+  recentBlocks.push(wireMessage);
+  if (recentBlocks.length > BLOCK_REPLAY) recentBlocks.shift();
   broadcast(wireMessage);
 });
 
