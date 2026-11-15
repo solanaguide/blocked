@@ -12,6 +12,7 @@ import { TimeAggregator } from './time-aggregator.js';
 import type { TradeSummary } from './time-aggregator.js';
 import { ConsensusFeed } from './consensus-feed.js';
 import { ValidatorNames } from './validator-names.js';
+import { SolPrice } from './sol-price.js';
 
 const app = express();
 const server = createServer(app);
@@ -37,7 +38,8 @@ const startTime = Date.now();
 const timeAggregator = new TimeAggregator();
 const consensus = new ConsensusFeed((m) => broadcast(m));
 timeAggregator.onBucketComplete((interval, data) => {
-  broadcast(data, interval);
+  const price = solPrice.get();
+  broadcast(price === undefined ? data : { ...data, solPrice: price }, interval);
 });
 
 // Network state cache for instant visualization startup
@@ -64,6 +66,9 @@ const tokenResolver = new TokenResolver();
 
 // Validator identity → display name (Solana Compass)
 const validatorNames = new ValidatorNames();
+
+// SOL/USD price (Solana Compass), omitted from messages when stale
+const solPrice = new SolPrice();
 
 // Signature cache for redirect route: slot → full signatures array
 const sigCache = new Map<number, string[]>();
@@ -514,6 +519,7 @@ redisSubscriber.onBlock(async (rawBlock) => {
     trades: compactTrades,
     leaderName: validatorNames.get(rawBlock.leader),
     topSwap: computeTopSwap(trades),
+    solPrice: solPrice.get(),
   };
 
   // Feed block + trade summaries to time aggregator
@@ -537,6 +543,7 @@ async function start() {
     timeAggregator.start();
     consensus.start();
     validatorNames.start();
+    solPrice.start();
 
     server.listen(config.websocket.port, () => {
       console.log(`Server started on port ${config.websocket.port}`);

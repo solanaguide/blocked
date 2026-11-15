@@ -148,6 +148,7 @@ export interface WireBlockMessage extends BlockFields {
   trades: CompactTrade[];
   leaderName?: string;  // validator display name, when known
   topSwap?: TopSwap;    // the block's largest swap by USD volume
+  solPrice?: number;    // SOL in USD (2dp); omitted when the price is stale
 }
 
 export interface TopSwap {
@@ -194,6 +195,7 @@ export interface AggregatedBlockFields {
   bucketEnd: number;        // Unix timestamp (seconds) of bucket end
   blockCount: number;       // How many blocks fell into this bucket
   isPartial: boolean;       // True if bucket is still accumulating
+  solPrice?: number;        // SOL in USD at send time; omitted when stale
 
   // --- Latest (most recent block) ---
   slot: number;
